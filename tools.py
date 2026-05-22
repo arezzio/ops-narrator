@@ -7,8 +7,11 @@ Two selectable Splunk MCP backends (env `OPS_MCP_BACKEND`):
 
 - ``official`` (default) — the **official Splunk MCP Server** (Splunkbase app 7931),
   installed *into* Splunk and exposed over streamable HTTP at
-  ``https://<host>:8089/services/mcp`` with Bearer-token auth. SPL tool: ``run_splunk_query``.
-  Requires the app installed in Splunk + a token in ``SPLUNK_MCP_TOKEN`` (see README).
+  ``https://<host>:8089/services/mcp`` with Bearer-token auth. SPL tool: ``splunk_run_query``
+  (query/earliest_time/latest_time/row_limit), results wrapped as
+  ``{results:[...], total_rows, truncated}`` (unwrapped by `_unwrap_official_rows`). The token
+  must come from ``/services/mcp_token`` (audience ``mcp``, RSA-encrypted) — a plain Splunk
+  token is rejected. Mint one with `mint_token.py`; store it in ``SPLUNK_MCP_TOKEN``.
 - ``livehybrid`` — the community ``livehybrid/splunk-mcp`` stdio server, spawned as a
   subprocess. SPL tool: ``search_splunk``. Kept as a fallback for when the official app
   isn't yet installed. (It wants SPLUNK_HOST/SPLUNK_PORT split; `_splunk_env()` does that.)
@@ -174,19 +177,38 @@ def _rows_from_result(result: Any) -> Any:
     return parsed
 
 
+def _unwrap_official_rows(rows: Any) -> Any:
+    """The official splunk_run_query wraps results: {results:[...], total_rows, truncated}.
+    Unwrap to the bare row list so row_count is accurate. (livehybrid returns a bare list.)"""
+    env = None
+    if isinstance(rows, dict) and "results" in rows:
+        env = rows
+    elif (
+        isinstance(rows, list)
+        and len(rows) == 1
+        and isinstance(rows[0], dict)
+        and "results" in rows[0]
+    ):
+        env = rows[0]
+    if env is not None and isinstance(env.get("results"), list):
+        return env["results"]
+    return rows
+
+
 def run_search(spl: str, earliest_time: str, latest_time: str, max_results: int = 500) -> dict:
     """Execute SPL via the active MCP backend and return the standard tool shape.
 
-    Picks the right tool name + argument names for the backend: ``run_splunk_query``
-    (query/earliest_time/latest_time) for the official server, ``search_splunk``
+    Picks the right tool name + argument names for the backend: ``splunk_run_query``
+    (query/earliest_time/latest_time/row_limit) for the official server, ``search_splunk``
     (search_query/.../max_results) for livehybrid.
     """
     if MCP_BACKEND == "official":
-        tool_name = "run_splunk_query"
+        tool_name = "splunk_run_query"
         arguments = {
             "query": spl,
             "earliest_time": earliest_time,
             "latest_time": latest_time,
+            "row_limit": min(max_results, 1000),  # official server caps at 1000
         }
     else:
         tool_name = "search_splunk"
@@ -198,6 +220,8 @@ def run_search(spl: str, earliest_time: str, latest_time: str, max_results: int 
         }
     result = asyncio.run(_acall(tool_name, arguments))
     rows = _rows_from_result(result)
+    if MCP_BACKEND == "official":
+        rows = _unwrap_official_rows(rows)
     if rows is None:
         rows = []
     if isinstance(rows, dict):

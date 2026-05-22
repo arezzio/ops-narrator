@@ -80,11 +80,13 @@ Splunk saved search ──webhook──▶ FastAPI /alert ──▶ agent loop (
    Splunk Developer License.)
 2. The **official Splunk MCP Server** app installed into that Splunk instance
    ([Splunkbase app 7931](https://splunkbase.splunk.com/app/7931)):
-   - Install the app and restart Splunk.
+   - Install the app and restart Splunk; it serves MCP at `https://<host>:8089/services/mcp`.
    - Grant the role you'll use the `mcp_tool_execute` (and, for full access, `mcp_tool_admin`)
-     capability.
-   - Create a Splunk **authentication token** for that user — this is the bearer token the agent
-     sends. The endpoint is `https://<host>:8089/services/mcp`.
+     capability. (`admin` typically has these already.)
+   - **Mint the bearer token via the app's `/services/mcp_token` endpoint** — *not* a normal
+     Splunk token. The server requires audience `mcp` and an RSA‑encrypted token
+     (`require_encrypted_token = true`); a plain token is rejected with HTTP 403
+     "Invalid token audience". The `mint_token.py` helper does this for you (see Setup).
 3. An **Anthropic API key** with access to `claude-opus-4-7`.
 
 ## Setup
@@ -99,10 +101,15 @@ cp .env.example .env
 #   then fill in (for the default 'official' backend):
 #     ANTHROPIC_API_KEY=...
 #     SPLUNK_HOST=localhost:8089        # host:port of the Splunk management API
-#     SPLUNK_MCP_TOKEN=<bearer token>   # token created in Splunk (mcp_tool_execute)
+#     SPLUNK_USERNAME / SPLUNK_PASSWORD # used to mint the MCP token (next step)
+
+# 3. mint the MCP bearer token (writes SPLUNK_MCP_TOKEN into .env).
+#    Re-run when it expires (default +90d) or auth starts failing.
+uv run python mint_token.py
 ```
 
-`.env` is gitignored.
+`.env` is gitignored. The official backend's SPL tool is `splunk_run_query`; results come back
+as `{results:[...], total_rows, truncated}` and are unwrapped automatically.
 
 ## Configuration — choosing the MCP backend
 
@@ -144,6 +151,7 @@ Tunable via env vars: `OPS_MODEL`, `OPS_EFFORT` (low|medium|high|xhigh|max), `OP
 | `tools.py` | The eight tool implementations (Splunk MCP client + payload decoder) |
 | `trace.py` | Reconstructs a JSONL reasoning trace from a run |
 | `main.py` | CLI entrypoint |
+| `mint_token.py` | Mint the official Splunk MCP Server bearer token into `.env` |
 | `prompts/` | System prompt + user alert template |
 | `validate_runs.py` | Multi‑run stability grader |
 | `test_*.py` | Unit + live integration tests |

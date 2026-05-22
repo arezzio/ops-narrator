@@ -29,12 +29,11 @@ May 18 – Jun 15, 2026 9:00 AM PDT**. Track: **Security**.
       URL + video link.
 - [ ] **Splunk setup per rules:** free Splunk account, Splunk Enterprise trial, and a
       **Developer License** applied to the instance (via dev.splunk.com developer program).
-- [ ] **Install the official Splunk MCP Server** ([Splunkbase app 7931](https://splunkbase.splunk.com/app/7931))
-      into your Splunk instance, restart Splunk, grant your role the `mcp_tool_execute`
-      capability, and create an auth token. Put the token in `.env` as `SPLUNK_MCP_TOKEN`.
-      Then validate end to end with `OPS_MCP_BACKEND=official uv run python main.py` (needs
-      Anthropic credits). Until then, `OPS_MCP_BACKEND=livehybrid` keeps the community server
-      working.
+- [x] **Official Splunk MCP Server installed + wired up.** App 7931 installed; `admin` has
+      `mcp_tool_execute`/`mcp_tool_admin`; token minted via `/services/mcp_token`
+      (`mint_token.py`) into `.env`. **8/8 live tool tests pass** against it
+      (`uv run pytest test_tools.py`). Remaining: one full agent run end to end
+      (`uv run python main.py`) once Anthropic credits are restored.
 - [ ] **Confirm eligibility:** age of majority; not in an excluded jurisdiction; not an
       employee/affiliate of Cisco/Splunk or Devpost, a government/state‑owned entity, or a
       Judge; team ≤ 2 with a designated Representative if applicable.
@@ -52,13 +51,12 @@ May 18 – Jun 15, 2026 9:00 AM PDT**. Track: **Security**.
    satisfying "Splunk's AI capabilities." If in doubt, the rules let you submit a written
    request for clarification before the deadline.
 
-2. **"Best Use of Splunk MCP Server" bonus ($1,000).** ✅ *Addressed.* The agent now defaults
-   to the **official Splunk MCP Server** (Splunkbase app 7931, `OPS_MCP_BACKEND=official`),
-   reached over streamable HTTP at `…/services/mcp` with a bearer token; its `run_splunk_query`
-   tool runs every investigative search. The community `livehybrid/splunk-mcp` stays as a
-   selectable fallback. **Still to do (you):** install the app + token in Splunk and run one
-   end‑to‑end validation once Anthropic credits are restored (the HTTP backend code is written
-   but unvalidated against a live instance).
+2. **"Best Use of Splunk MCP Server" bonus ($1,000).** ✅ *Done & validated.* The agent uses
+   the **official Splunk MCP Server** (Splunkbase app 7931, `OPS_MCP_BACKEND=official`) over
+   streamable HTTP at `…/services/mcp` with an encrypted bearer token; its `splunk_run_query`
+   tool runs every investigative search, validated by 8/8 live tool tests. The community
+   `livehybrid/splunk-mcp` stays as a selectable fallback. Only a full agent run remains
+   (blocked on Anthropic credits, not on Splunk).
 
 3. **"Best Use of Splunk Hosted Models" bonus ($1,000).** Not currently eligible — we use
    Claude, not Splunk‑hosted models (anomaly detection, forecasting, etc.). Pursuing this

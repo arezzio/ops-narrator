@@ -41,7 +41,7 @@ flowchart TD
     LOOP <-- "messages + tool_use / tool_result" --> CLAUDE
     LOOP --> TOOLS
     TOOLS --> MCPC
-    MCPC -- "run_splunk_query (SPL, time window)<br/>bearer token over HTTP" --> MCP
+    MCPC -- "splunk_run_query (SPL, time window)<br/>bearer token over HTTP" --> MCP
     MCP -- "runs SPL internally" --> REST
     REST -- "rows (JSON)" --> MCP --> MCPC --> TOOLS --> LOOP
     LOOP --> BRIEF
@@ -61,7 +61,7 @@ sequenceDiagram
     loop until finalize_brief / budget hit
         App->>Claude: messages + tool schemas
         Claude-->>App: thinking + tool_use (e.g. splunk_search)
-        App->>MCP: run_splunk_query(SPL, earliest, latest) over HTTP + bearer
+        App->>MCP: splunk_run_query(SPL, earliest, latest) over HTTP + bearer
         MCP->>Splunk: runs the SPL internally
         Splunk-->>MCP: rows
         MCP-->>App: rows (JSON)
@@ -79,7 +79,7 @@ Splunk is both the *trigger* and the *evidence store*. A saved search detects th
 event and POSTs it to the webhook (`/alert`; the `main.py` CLI provides the same entrypoint
 today). During the investigation, every Splunk‑backed tool in `tools.py` calls the **official
 Splunk MCP Server** (Splunkbase app 7931) — which runs *inside* Splunk and is reached over
-streamable HTTP at `https://<host>:8089/services/mcp` with a bearer token. Its `run_splunk_query`
+streamable HTTP at `https://<host>:8089/services/mcp` with a bearer token. Its `splunk_run_query`
 tool executes the SPL against live Splunk data and returns rows; the app never embeds answers.
 (A community `livehybrid/splunk-mcp` stdio backend is selectable via `OPS_MCP_BACKEND` as a
 fallback.)
