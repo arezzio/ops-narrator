@@ -50,6 +50,13 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [ ] **Session 8 — Trace UI** (`viewer.html`, single-file, served via FastAPI static).
 - [ ] **Session 9 — Rehearsals** (user; 3 consecutive clean runs; live-vs-prerecord decision).
 - [ ] **Session 10 — Polish + handoff** (README, 1-page handout, positioning slide, final recording).
+  - *Compliance pass (done early):* `LICENSE` (MIT), `README.md`, `architecture_diagram.md`, and
+    `SUBMISSION_CHECKLIST.md` added to satisfy the Hackathon's mandatory submission artifacts;
+    `main.py` is now a real CLI entrypoint. Remaining for Session 10: 1-page handout, positioning
+    slide, final recording, and the user-only items in `SUBMISSION_CHECKLIST.md` (public GitHub
+    push, demo video, Devpost submit, Splunk Developer License). **Open strategic question flagged
+    there:** whether to target the *official* Splunk MCP Server (vs the community one) for the
+    "Best Use of Splunk MCP Server" bonus + Stage-One theme fit.
 
 ## Current position
 **Session 4 code is committed but UNVERIFIED — live validation is blocked on Anthropic API

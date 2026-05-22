@@ -1,7 +1,7 @@
 [project]
 name = "ops-narrator"
 version = "0.1.0"
-description = "Add your description here"
+description = "An AI SOC analyst that investigates a Splunk alert end to end and writes the incident brief."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
