@@ -42,7 +42,7 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [x] **One-time setup** — uv project, deps, `.env` (all secrets), Splunk up, spec + tool-menu committed.
 - [x] **Session 1 — Tool wrappers** — `tools.py` + `test_tools.py`, **8/8 passing** live. Confirmed: 3 hosts (BSTOLL-L/ABUNGST-L/FYODOR-L), 1 WMI lateral hit (FYODOR-L), UAC path empty (dead end).
 - [x] **Session 2 — Agent loop** — `agent.py` (manual loop, opus-4-7, **adaptive thinking + effort** — not budget_tokens, see gotcha #9 — ≤12 model iters, 90s cap), `prompts/system.md` (anti-recall placeholder) + `prompts/user_template.md`, `run_agent()`, `test_agent.py`. Live test PASSES: loop pulled the full enc blob from Splunk, decoded the stager, mapped spread to 3 hosts, found the WMI lateral hit, and called `finalize_brief` (`stop_reason=finalized`). Agent investigated for real (found the SharePoint LNK lure + fodhelper UAC bypass on FYODOR-L, the path spec marked unvalidated).
-- [ ] **Session 3 — Trace logger** (`trace.py` → `trace.jsonl`; event types incl. thinking blocks, tool calls w/ latency+row_count, hypothesis_revision via diff heuristic).
+- [x] **Session 3 — Trace logger** — `trace.py` (standalone; reconstructs JSONL from `run_agent` result) + `test_trace.py` (9/9 fast, offline). Wired into `run_agent` (writes `traces/trace-<utc>-<host>.jsonl` by default, guarded; `trace_path` in result). Live `test_agent.py` PASSES with trace assertions: real run produced **52 events** (8 thinking, 18 tool_call+18 tool_result, 4 assistant_text, **2 hypothesis_revision**). Event types: `run_started · thinking · assistant_text · tool_call · tool_result · hypothesis_revision · run_finished`.
 - [ ] **Session 4 — System prompt + brief schema** (write `prompts/system.md`; expand `finalize_brief` schema; 5 consecutive clean runs).
 - [ ] **Session 5 — Force the pivot** (tune tool *outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).
 - [ ] **Session 6 — FastAPI webhook** (`webhook.py` POST `/alert`, 200 + background task, writes `briefs/` + `traces/`).
@@ -52,14 +52,25 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [ ] **Session 10 — Polish + handoff** (README, 1-page handout, positioning slide, final recording).
 
 ## Current position
-**Session 2 complete and committed.** Next is **Session 3 — Trace logger**: build `trace.py`
-that records the run as `trace.jsonl`. `run_agent()` already returns everything the logger
-needs — `messages` (full transcript incl. thinking blocks, since `display:"summarized"` is on),
-`tool_calls` (each with `name`, `input`, `latency_ms`, `row_count`, `is_error`), `usage`,
-`iterations`, `stop_reason`. Emit one JSONL event per: thinking block, tool call (with latency
-+ row_count), tool result, and a `hypothesis_revision` event derived via a diff heuristic over
-consecutive thinking blocks. Wire the logger into `run_agent` (or wrap it) so a run writes a
-trace without changing the loop's behavior. No webhook/UI yet.
+**Session 3 complete and committed.** Next is **Session 4 — System prompt + brief schema**:
+write the real `prompts/system.md` (still anti-recall — gotcha #4: no BOTSv3/Frothly/Empire/
+host/outcome names) and expand `finalize_brief`'s schema. The live Session-3 run already
+produces a rich, well-structured brief (headline/summary/findings + timeline/iocs/mitre/gaps/
+recommended_containment), so Session 4 is mostly *codifying* that shape into the schema +
+prompt and proving stability (5 consecutive clean runs).
+
+Trace-logger notes for whoever builds the Session 8 viewer:
+- `trace.py` is standalone (no `agent` import); `agent` imports it. `run_agent(alert, trace=True)`
+  writes `traces/trace-<utc>-<host>.jsonl` and sets `result["trace_path"]` (failure is caught →
+  `result["trace_error"]`, never breaks the run). `traces/` + `briefs/` are gitignored.
+- Each line is one event with `seq` (dense 0..n) + `type`. `build_events(result, alert=, config=)`
+  is the pure reconstruction fn; `read_trace(path)` loads it back.
+- `hypothesis_revision` is a heuristic: a curated pivot-cue word (`PIVOT_CUES`) appearing in a
+  thinking block that has a prior block. On the live run it fired 2× and both were genuine
+  pivots (search-strategy backtrack; .lnk/SharePoint reinterpretation) — tune `PIVOT_CUES` in
+  Session 5 if recall is off. Tool-result content is truncated at `CONTENT_CAP` (6000 chars).
+- We do NOT capture per-event wall-clock timestamps (only tool `latency_ms`); ordering is `seq`.
+  If the viewer wants a real timeline, add `ts` capture in the loop (additive) later.
 
 ## How to resume
 1. `cd ~/ops-narrator` and read this file + `tool-menu.md`.

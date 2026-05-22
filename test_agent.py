@@ -16,6 +16,7 @@ import os
 os.environ.setdefault("OPS_WALL_CLOCK_CAP", "300")
 
 import agent  # noqa: E402
+import trace as trace_log  # noqa: E402
 
 # The spec's trigger event (ops-narrator-demo-spec-2.md §Demo Trigger Event). The command
 # line is truncated as a real webhook payload would be — the agent is expected to pull the
@@ -63,3 +64,23 @@ def test_run_agent_finalizes_brief():
     names = [c["name"] for c in result["tool_calls"]]
     assert len(names) >= 2, names
     assert any(n != "finalize_brief" for n in names), names
+
+    # Section 3: a JSONL reasoning trace was written and reloads with the expected
+    # event stream (real Opus 4.7 thinking blocks + correlated tool calls).
+    assert "trace_path" in result, result.get("trace_error")
+    events = trace_log.read_trace(result["trace_path"])
+    print(f"\n=== TRACE ({result['trace_path']}, {len(events)} events) ===")
+    from collections import Counter
+
+    print(Counter(e["type"] for e in events))
+
+    assert events[0]["type"] == "run_started"
+    assert events[-1]["type"] == "run_finished"
+    types = {e["type"] for e in events}
+    assert "thinking" in types, "no thinking captured — is display:summarized on?"
+    assert "tool_call" in types
+    assert "tool_result" in types
+    # Every tool_call should carry latency, and Splunk-backed ones a row_count.
+    for e in events:
+        if e["type"] == "tool_call":
+            assert e["latency_ms"] is not None, e

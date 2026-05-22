@@ -26,6 +26,7 @@ import anthropic
 from dotenv import load_dotenv
 
 import tools
+import trace as trace_log
 
 load_dotenv()
 
@@ -276,11 +277,15 @@ def _build_user_text(alert: dict) -> str:
     )
 
 
-def run_agent(alert_payload: dict) -> dict:
+def run_agent(alert_payload: dict, *, trace: bool = True) -> dict:
     """Investigate one triggering alert. Returns the brief + run metadata.
 
     The loop ends when the model calls finalize_brief, or when it hits the iteration
     cap, the wall-clock cap, or stops on its own (end_turn).
+
+    If `trace` is True (default), a JSONL reasoning trace is written to traces/ and
+    its path is returned under result["trace_path"]. Trace writing is guarded — a
+    logging failure never breaks the run, since the brief is the product.
     """
     system = [
         {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
@@ -354,7 +359,7 @@ def run_agent(alert_payload: dict) -> dict:
             stop = "finalized"
             break
 
-    return {
+    result = {
         "brief": brief,
         "stop_reason": stop,
         "iterations": iters,
@@ -363,3 +368,19 @@ def run_agent(alert_payload: dict) -> dict:
         "usage": usage,
         "messages": messages,
     }
+
+    if trace:
+        config = {
+            "model": MODEL,
+            "effort": EFFORT,
+            "max_iters": MAX_ITERS,
+            "wall_clock_cap_sec": WALL_CLOCK_CAP,
+        }
+        try:
+            result["trace_path"] = str(
+                trace_log.write_trace(result, alert=alert_payload, config=config)
+            )
+        except Exception as e:  # logging must never sink a finished investigation
+            result["trace_error"] = f"{type(e).__name__}: {e}"
+
+    return result

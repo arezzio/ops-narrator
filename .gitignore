@@ -13,3 +13,10 @@ wheels/
 .env
 .env.*
 !.env.example
+
+# Run artifacts
+traces/
+briefs/
+
+# Harness artifacts
+.claude/scheduled_tasks.lock
