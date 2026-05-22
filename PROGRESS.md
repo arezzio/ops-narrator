@@ -35,11 +35,13 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 6. **Pre-existing warning:** `botsv3_data_set` app `props.conf:102` has a bad `EXTRACT-src` regex (parse error at startup). Not ours; may affect `src_ip` extraction.
 7. **TIMEZONE (confirmed Session 1):** this Splunk server renders in **CST (UTC-6)**, but the spec quotes **EDT (UTC-4)** wall-clock — a **2-hour** difference. Bare ISO `earliest_time`/`latest_time` are interpreted in CST. So the spec's trigger "05:59:48 EDT" is **03:59:48 CST**; the WMI lateral hit "06:15:27 EDT" is **04:15:27 CST**. When the agent builds windows in Session 2, do the EDT→CST shift (or pass offset-aware times) and keep windows wide. Tests use a `2018-08-20T03:00:00`–`08:00:00` morning window.
 8. **Account-name quirk (confirmed Session 1):** 4688 process events use short names (`BudStoll`); 4624/4625 auth events store email/machine forms (`bstoll@froth.ly`, `BSTOLL-L$`). A `Account_Name=BudStoll` filter misses auth events — `trace_account_activity` matches the **bare keyword** instead, which hits the raw event text. (This is why spec Query 6 was never validated.)
+9. **Opus 4.7 thinking API (confirmed Session 2):** the spec's "thinking budget 8000" does **not** translate to `thinking={"type":"enabled","budget_tokens":N}` — that **400s on `claude-opus-4-7`** (budget_tokens, temperature, top_p, top_k all removed). `agent.py` uses `thinking={"type":"adaptive","display":"summarized"}` + `output_config={"effort": EFFORT}` (env `OPS_EFFORT`, default `high`). `display:"summarized"` matters: 4.7 omits thinking text by default, so Session 3's trace logger needs it on to capture reasoning. SDK `anthropic 0.104.1` supports both.
+10. **MCP subprocess perf (observed Session 2):** every Splunk-backed tool call spawns a fresh `uv --directory … run python splunk_mcp.py stdio` subprocess (~0.7–1.1s each) plus opus thinking time. A full investigation ran **~5 min** — far over the 90s wall-clock cap and the demo's <30s target. The cap is honored (loop exits), but for the live demo we'll need MCP connection reuse / a persistent session. Not blocking the loop build; flagged for a perf pass before rehearsals.
 
 ## Plan / session checklist
 - [x] **One-time setup** — uv project, deps, `.env` (all secrets), Splunk up, spec + tool-menu committed.
 - [x] **Session 1 — Tool wrappers** — `tools.py` + `test_tools.py`, **8/8 passing** live. Confirmed: 3 hosts (BSTOLL-L/ABUNGST-L/FYODOR-L), 1 WMI lateral hit (FYODOR-L), UAC path empty (dead end).
-- [ ] **Session 2 — Agent loop** (`agent.py`, opus-4-7, thinking budget 8000, ≤12 iters, 90s cap; `prompts/system.md` placeholder, `prompts/user_template.md`; `run_agent()`; `test_agent.py`).
+- [x] **Session 2 — Agent loop** — `agent.py` (manual loop, opus-4-7, **adaptive thinking + effort** — not budget_tokens, see gotcha #9 — ≤12 model iters, 90s cap), `prompts/system.md` (anti-recall placeholder) + `prompts/user_template.md`, `run_agent()`, `test_agent.py`. Live test PASSES: loop pulled the full enc blob from Splunk, decoded the stager, mapped spread to 3 hosts, found the WMI lateral hit, and called `finalize_brief` (`stop_reason=finalized`). Agent investigated for real (found the SharePoint LNK lure + fodhelper UAC bypass on FYODOR-L, the path spec marked unvalidated).
 - [ ] **Session 3 — Trace logger** (`trace.py` → `trace.jsonl`; event types incl. thinking blocks, tool calls w/ latency+row_count, hypothesis_revision via diff heuristic).
 - [ ] **Session 4 — System prompt + brief schema** (write `prompts/system.md`; expand `finalize_brief` schema; 5 consecutive clean runs).
 - [ ] **Session 5 — Force the pivot** (tune tool *outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).
@@ -50,13 +52,14 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [ ] **Session 10 — Polish + handoff** (README, 1-page handout, positioning slide, final recording).
 
 ## Current position
-**Session 1 complete and committed.** Next is **Session 2 — Agent loop skeleton**: build
-`agent.py` with the Anthropic SDK loop (`claude-opus-4-7`, extended thinking budget 8000,
-≤12 tool iterations, 90s wall-clock cap), register the 8 tools from `tools.py`, loop exits on
-`finalize_brief` or a cap. `prompts/system.md` = placeholder for now; `prompts/user_template.md`
-formats the trigger event fields. Add `run_agent(alert_payload: dict) -> dict`. Write
-`test_agent.py` that runs the spec's trigger event and prints the brief. No webhook/trace yet.
-Remember the CST window shift (gotcha #7) when formatting the trigger time into queries.
+**Session 2 complete and committed.** Next is **Session 3 — Trace logger**: build `trace.py`
+that records the run as `trace.jsonl`. `run_agent()` already returns everything the logger
+needs — `messages` (full transcript incl. thinking blocks, since `display:"summarized"` is on),
+`tool_calls` (each with `name`, `input`, `latency_ms`, `row_count`, `is_error`), `usage`,
+`iterations`, `stop_reason`. Emit one JSONL event per: thinking block, tool call (with latency
++ row_count), tool result, and a `hypothesis_revision` event derived via a diff heuristic over
+consecutive thinking blocks. Wire the logger into `run_agent` (or wrap it) so a run writes a
+trace without changing the loop's behavior. No webhook/UI yet.
 
 ## How to resume
 1. `cd ~/ops-narrator` and read this file + `tool-menu.md`.
