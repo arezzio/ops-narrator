@@ -43,7 +43,7 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [x] **Session 1 — Tool wrappers** — `tools.py` + `test_tools.py`, **8/8 passing** live. Confirmed: 3 hosts (BSTOLL-L/ABUNGST-L/FYODOR-L), 1 WMI lateral hit (FYODOR-L), UAC path empty (dead end).
 - [x] **Session 2 — Agent loop** — `agent.py` (manual loop, opus-4-7, **adaptive thinking + effort** — not budget_tokens, see gotcha #9 — ≤12 model iters, 90s cap), `prompts/system.md` (anti-recall placeholder) + `prompts/user_template.md`, `run_agent()`, `test_agent.py`. Live test PASSES: loop pulled the full enc blob from Splunk, decoded the stager, mapped spread to 3 hosts, found the WMI lateral hit, and called `finalize_brief` (`stop_reason=finalized`). Agent investigated for real (found the SharePoint LNK lure + fodhelper UAC bypass on FYODOR-L, the path spec marked unvalidated).
 - [x] **Session 3 — Trace logger** — `trace.py` (standalone; reconstructs JSONL from `run_agent` result) + `test_trace.py` (9/9 fast, offline). Wired into `run_agent` (writes `traces/trace-<utc>-<host>.jsonl` by default, guarded; `trace_path` in result). Live `test_agent.py` PASSES with trace assertions: real run produced **52 events** (8 thinking, 18 tool_call+18 tool_result, 4 assistant_text, **2 hypothesis_revision**). Event types: `run_started · thinking · assistant_text · tool_call · tool_result · hypothesis_revision · run_finished`.
-- [ ] **Session 4 — System prompt + brief schema** (write `prompts/system.md`; expand `finalize_brief` schema; 5 consecutive clean runs).
+- [~] **Session 4 — System prompt + brief schema** — **code done, live validation BLOCKED on API credits.** Wrote the real anti-recall `prompts/system.md` (describes the brief shape + P1–P4 severity + evidence discipline; still no dataset/threat/host/IP/outcome names) and expanded `finalize_brief`'s schema to codify the Session-3 brief shape: `severity, headline, summary, findings[{title,evidence,mitre[],iocs[]}], timeline[], iocs{}, scope{}, gaps[], recommended_containment[]` (required: severity/headline/summary/findings/recommended_containment). Added `validate_runs.py` (grader scores each run clean = finalized + schema-complete + ground-truth substance: 3 hosts, C2 IP, WMI lateral, payload decoded — ground truth kept OUT of the prompt). Agent imports clean. **The 5-consecutive-clean-runs bar is NOT yet met:** the smoke run 400'd with "credit balance is too low" (the big Session-3 run drained the Anthropic account). Resume: top up API credits, then `uv run python validate_runs.py 5`.
 - [ ] **Session 5 — Force the pivot** (tune tool *outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).
 - [ ] **Session 6 — FastAPI webhook** (`webhook.py` POST `/alert`, 200 + background task, writes `briefs/` + `traces/`).
 - [ ] **Session 7 — Splunk saved search** (in Splunk Web; webhook alert action → `http://localhost:8000/alert`).
@@ -52,12 +52,19 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [ ] **Session 10 — Polish + handoff** (README, 1-page handout, positioning slide, final recording).
 
 ## Current position
-**Session 3 complete and committed.** Next is **Session 4 — System prompt + brief schema**:
-write the real `prompts/system.md` (still anti-recall — gotcha #4: no BOTSv3/Frothly/Empire/
-host/outcome names) and expand `finalize_brief`'s schema. The live Session-3 run already
-produces a rich, well-structured brief (headline/summary/findings + timeline/iocs/mitre/gaps/
-recommended_containment), so Session 4 is mostly *codifying* that shape into the schema +
-prompt and proving stability (5 consecutive clean runs).
+**Session 4 code is committed but UNVERIFIED — live validation is blocked on Anthropic API
+credits** (smoke run returned HTTP 400 "credit balance is too low"). The earlier Session-3
+live run this session passed cleanly, so the loop/MCP path is sound; only the new schema +
+system prompt are unverified against a real run. **To finish Session 4:** add API credits,
+run `uv run python validate_runs.py 5`, fix anything that isn't clean, then flip the checklist
+item to `[x]`. (NB: `validate_runs.py` piped through `tee` masks the Python exit code — check
+the printed table / for a traceback, not just `$?`.)
+
+After Session 4 is verified, the plan continues at **Session 5 — Force the pivot** (tune tool
+*outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).
+Note the Session-3 live run already produced a rich, well-structured brief and 2 genuine
+hypothesis pivots, so the raw behavior is close; Sessions 4–5 are about *codifying the brief
+shape* and *making the pivot reliable*.
 
 Trace-logger notes for whoever builds the Session 8 viewer:
 - `trace.py` is standalone (no `agent` import); `agent` imports it. `run_agent(alert, trace=True)`

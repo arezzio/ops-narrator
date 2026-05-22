@@ -185,25 +185,132 @@ TOOL_DEFS: list[dict] = [
     {
         "name": "finalize_brief",
         "description": (
-            "Submit the finished incident brief. Call this exactly once, when the "
-            "investigation is complete, to end the run."
+            "Submit the finished incident brief and end the run. Call exactly once, only "
+            "after you have decoded any payload and established scope across hosts. "
+            "Populate every field you have evidence for; omit a field only when the "
+            "investigation genuinely yielded nothing for it."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "brief": {
                     "type": "object",
-                    "description": (
-                        "The structured incident brief. Include at minimum a headline, a "
-                        "narrative summary, and a list of findings; add timeline, IOCs, "
-                        "MITRE techniques, gaps, and recommended containment as warranted."
-                    ),
+                    "description": "The structured incident brief.",
                     "properties": {
-                        "headline": {"type": "string"},
-                        "summary": {"type": "string"},
-                        "findings": {"type": "array", "items": {"type": "object"}},
+                        "severity": {
+                            "type": "string",
+                            "description": (
+                                "Analyst severity rating: one of P1, P2, P3, P4 "
+                                "(P1 = active critical compromise needing immediate response)."
+                            ),
+                        },
+                        "headline": {
+                            "type": "string",
+                            "description": (
+                                "One-line verdict a SOC lead can read at a glance — what "
+                                "happened, how broad, how severe."
+                            ),
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": (
+                                "Narrative reconstruction: how it started, what the payload "
+                                "actually does, how/whether it spread, and the current stage."
+                            ),
+                        },
+                        "findings": {
+                            "type": "array",
+                            "description": (
+                                "The discrete, evidence-backed findings that support the "
+                                "summary. One object per finding."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "evidence": {
+                                        "type": "string",
+                                        "description": (
+                                            "Concrete proof: the host(s), time(s) and exact "
+                                            "field values / log artifacts observed."
+                                        ),
+                                    },
+                                    "mitre": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": (
+                                            'MITRE ATT&CK technique IDs + names, e.g. '
+                                            '"T1059.001 PowerShell".'
+                                        ),
+                                    },
+                                    "iocs": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "Indicators tied to this finding, verbatim.",
+                                    },
+                                },
+                                "required": ["title", "evidence"],
+                            },
+                        },
+                        "timeline": {
+                            "type": "array",
+                            "description": (
+                                "Chronological events. State the timezone you are reporting in."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "time": {"type": "string"},
+                                    "host": {"type": "string"},
+                                    "event": {"type": "string"},
+                                },
+                                "required": ["time", "event"],
+                            },
+                        },
+                        "iocs": {
+                            "type": "object",
+                            "description": (
+                                "Consolidated indicators of compromise grouped by type "
+                                "(e.g. ipv4, domains, urls, files, registry, user_agents, "
+                                "cookies, keys, hosts, accounts). Record values exactly as "
+                                "they appear in the evidence."
+                            ),
+                        },
+                        "scope": {
+                            "type": "object",
+                            "description": "Blast radius.",
+                            "properties": {
+                                "hosts": {"type": "array", "items": {"type": "string"}},
+                                "accounts": {"type": "array", "items": {"type": "string"}},
+                                "stage": {
+                                    "type": "string",
+                                    "description": "Intrusion stage(s) observed.",
+                                },
+                            },
+                        },
+                        "gaps": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "What remains unknown or unverifiable, and why — including any "
+                                "logging the attacker may have blinded."
+                            ),
+                        },
+                        "recommended_containment": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Prioritized, specific containment / remediation / hunt actions."
+                            ),
+                        },
                     },
-                    "required": ["headline", "summary", "findings"],
+                    "required": [
+                        "severity",
+                        "headline",
+                        "summary",
+                        "findings",
+                        "recommended_containment",
+                    ],
                 }
             },
             "required": ["brief"],
