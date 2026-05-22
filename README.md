@@ -39,10 +39,13 @@ by turn — what to look at next:
 | `trace_account_activity` | Trace where an account authenticated |
 | `finalize_brief` | Submit the structured incident brief and end the run |
 
-All Splunk‑backed tools reach Splunk through the **Splunk MCP server** (stdio), so the agent
-operates over real Splunk data via the Model Context Protocol — not hardcoded answers. Every
-run also produces a **reasoning trace** (`trace.py` → `traces/*.jsonl`): one event per thinking
-step, tool call (with latency + row count), tool result, and detected hypothesis revision.
+All Splunk‑backed tools reach Splunk through the **official Splunk MCP Server** (Splunkbase
+app 7931) — installed into Splunk and called over streamable HTTP via the Model Context
+Protocol — so the agent operates over real Splunk data, not hardcoded answers. (A community
+`livehybrid/splunk-mcp` stdio backend is also supported as a fallback; see Configuration.)
+Every run also produces a **reasoning trace** (`trace.py` → `traces/*.jsonl`): one event per
+thinking step, tool call (with latency + row count), tool result, and detected hypothesis
+revision.
 
 > **Note on the tool design:** the model‑facing tool descriptions and system prompt are
 > deliberately *generic* — they never name the dataset, threat family, hosts, or expected
@@ -64,18 +67,24 @@ Splunk saved search ──webhook──▶ FastAPI /alert ──▶ agent loop (
 ## Tech stack
 
 - **Anthropic Claude** (`claude-opus-4-7`) via the `anthropic` Python SDK — the agent's reasoning
-- **Splunk MCP server** (stdio) — the agent's bridge to Splunk over the Model Context Protocol
+- **Official Splunk MCP Server** (Splunkbase app 7931, streamable HTTP) — the agent's bridge to
+  Splunk over the Model Context Protocol
 - **Splunk Enterprise** with the **BOTSv3** dataset — the log data under investigation
 - **FastAPI + Uvicorn** — the webhook that receives the Splunk alert *(in progress, see Status)*
 - **Python ≥ 3.10**, managed with [`uv`](https://docs.astral.sh/uv/)
 
 ## Prerequisites
 
-1. **Splunk Enterprise** running locally with the **BOTSv3** dataset indexed, and the Windows TA
-   so 4688 process‑creation fields extract. (Per the Hackathon rules, run it under a Splunk
-   Developer License.)
-2. A **Splunk MCP server** install reachable over stdio. This project shells out to one and
-   passes Splunk connection settings via the subprocess environment (username/password auth).
+1. **Splunk Enterprise** (10.2+) running locally with the **BOTSv3** dataset indexed, and the
+   Windows TA so 4688 process‑creation fields extract. (Per the Hackathon rules, run it under a
+   Splunk Developer License.)
+2. The **official Splunk MCP Server** app installed into that Splunk instance
+   ([Splunkbase app 7931](https://splunkbase.splunk.com/app/7931)):
+   - Install the app and restart Splunk.
+   - Grant the role you'll use the `mcp_tool_execute` (and, for full access, `mcp_tool_admin`)
+     capability.
+   - Create a Splunk **authentication token** for that user — this is the bearer token the agent
+     sends. The endpoint is `https://<host>:8089/services/mcp`.
 3. An **Anthropic API key** with access to `claude-opus-4-7`.
 
 ## Setup
@@ -87,15 +96,24 @@ uv sync
 
 # 2. configure secrets
 cp .env.example .env
-#   then fill in:
+#   then fill in (for the default 'official' backend):
 #     ANTHROPIC_API_KEY=...
-#     SPLUNK_USERNAME=admin
-#     SPLUNK_PASSWORD=...
-#     SPLUNK_HOST=localhost:8089     # host:port of the Splunk management API
+#     SPLUNK_HOST=localhost:8089        # host:port of the Splunk management API
+#     SPLUNK_MCP_TOKEN=<bearer token>   # token created in Splunk (mcp_tool_execute)
 ```
 
-`.env` is gitignored. The agent splits `SPLUNK_HOST` into the host/port/scheme the MCP server
-expects before spawning it.
+`.env` is gitignored.
+
+## Configuration — choosing the MCP backend
+
+`OPS_MCP_BACKEND` selects how the agent reaches Splunk:
+
+| Value | Server | Transport | Auth | Needs |
+|---|---|---|---|---|
+| `official` *(default)* | Official Splunk MCP Server (Splunkbase 7931) | streamable HTTP `…/services/mcp` | bearer token | `SPLUNK_MCP_TOKEN` + app installed in Splunk |
+| `livehybrid` | community `livehybrid/splunk-mcp` | stdio subprocess | username/password | `SPLUNK_USERNAME`/`SPLUNK_PASSWORD` + `SPLUNK_MCP_DIR` |
+
+TLS verification follows `VERIFY_SSL` (default `false` for a local self‑signed Splunk).
 
 ## Run
 

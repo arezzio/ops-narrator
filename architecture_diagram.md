@@ -22,7 +22,7 @@ flowchart TD
         CLI["main.py CLI<br/>(works today)"]
         LOOP["Agent loop — agent.py<br/>Claude Opus 4.7 + tools<br/>iteration & wall-clock budget"]
         TOOLS["Tool layer — tools.py<br/>8 tools incl. payload decoder"]
-        MCPC["MCP stdio client<br/>(spawned per call)"]
+        MCPC["MCP client<br/>(HTTP, official backend)"]
         TRACE["Trace logger — trace.py"]
         BRIEF[["Incident brief (JSON)"]]
         TJ[["traces/*.jsonl"]]
@@ -33,7 +33,7 @@ flowchart TD
         CLAUDE["claude-opus-4-7<br/>adaptive thinking + tool use"]
     end
 
-    MCP["Splunk MCP server<br/>(stdio, Model Context Protocol)"]
+    MCP["Official Splunk MCP Server<br/>(Splunkbase app 7931, in-Splunk)<br/>HTTP :8089/services/mcp"]
 
     SS -- webhook --> WH
     WH --> LOOP
@@ -41,8 +41,8 @@ flowchart TD
     LOOP <-- "messages + tool_use / tool_result" --> CLAUDE
     LOOP --> TOOLS
     TOOLS --> MCPC
-    MCPC -- "search_splunk (SPL, time window)" --> MCP
-    MCP -- "REST search" --> REST
+    MCPC -- "run_splunk_query (SPL, time window)<br/>bearer token over HTTP" --> MCP
+    MCP -- "runs SPL internally" --> REST
     REST -- "rows (JSON)" --> MCP --> MCPC --> TOOLS --> LOOP
     LOOP --> BRIEF
     LOOP --> TRACE --> TJ --> VIEW
@@ -55,14 +55,14 @@ sequenceDiagram
     participant Splunk
     participant App as Agent loop (agent.py)
     participant Claude as Claude Opus 4.7
-    participant MCP as Splunk MCP server
+    participant MCP as Official Splunk MCP Server (in-Splunk)
 
     Splunk->>App: alert (4688 encoded PowerShell)
     loop until finalize_brief / budget hit
         App->>Claude: messages + tool schemas
         Claude-->>App: thinking + tool_use (e.g. splunk_search)
-        App->>MCP: search_splunk(SPL, earliest, latest)
-        MCP->>Splunk: REST search
+        App->>MCP: run_splunk_query(SPL, earliest, latest) over HTTP + bearer
+        MCP->>Splunk: runs the SPL internally
         Splunk-->>MCP: rows
         MCP-->>App: rows (JSON)
         App->>Claude: tool_result (+ latency, row_count captured)
@@ -77,11 +77,12 @@ sequenceDiagram
 **1. How the application interacts with Splunk.**
 Splunk is both the *trigger* and the *evidence store*. A saved search detects the suspicious
 event and POSTs it to the webhook (`/alert`; the `main.py` CLI provides the same entrypoint
-today). During the investigation, every Splunk‑backed tool in `tools.py` talks to Splunk
-**through the Splunk MCP server over stdio** — the MCP server issues the actual REST search
-against Splunk's management API (`:8089`) and returns rows. The app never embeds answers; it
-queries live Splunk data. Connection settings (host/port/scheme, username/password) are passed
-to the MCP subprocess via its environment.
+today). During the investigation, every Splunk‑backed tool in `tools.py` calls the **official
+Splunk MCP Server** (Splunkbase app 7931) — which runs *inside* Splunk and is reached over
+streamable HTTP at `https://<host>:8089/services/mcp` with a bearer token. Its `run_splunk_query`
+tool executes the SPL against live Splunk data and returns rows; the app never embeds answers.
+(A community `livehybrid/splunk-mcp` stdio backend is selectable via `OPS_MCP_BACKEND` as a
+fallback.)
 
 **2. How AI models / agents are integrated.**
 The agent is a manual tool‑use loop (`agent.py`) over `claude-opus-4-7` with adaptive extended

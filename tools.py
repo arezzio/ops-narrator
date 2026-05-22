@@ -1,11 +1,19 @@
 """Ops Narrator — Section 1 tool wrappers.
 
-Eight functions the agent can call. Six wrap the livehybrid/splunk-mcp stdio server
-(`search_splunk`); two are pure Python (`decode_payload`, `finalize_brief`).
+Eight functions the agent can call. Six reach Splunk through an MCP server; two are pure
+Python (`decode_payload`, `finalize_brief`).
 
-See tool-menu.md for signatures/contracts and PROGRESS.md for gotchas. The most important
-one: splunk-mcp wants SPLUNK_HOST/SPLUNK_PORT *separate*, while our .env stores them combined
-as SPLUNK_HOST=localhost:8089 — _splunk_env() splits them before spawning the subprocess.
+Two selectable Splunk MCP backends (env `OPS_MCP_BACKEND`):
+
+- ``official`` (default) — the **official Splunk MCP Server** (Splunkbase app 7931),
+  installed *into* Splunk and exposed over streamable HTTP at
+  ``https://<host>:8089/services/mcp`` with Bearer-token auth. SPL tool: ``run_splunk_query``.
+  Requires the app installed in Splunk + a token in ``SPLUNK_MCP_TOKEN`` (see README).
+- ``livehybrid`` — the community ``livehybrid/splunk-mcp`` stdio server, spawned as a
+  subprocess. SPL tool: ``search_splunk``. Kept as a fallback for when the official app
+  isn't yet installed. (It wants SPLUNK_HOST/SPLUNK_PORT split; `_splunk_env()` does that.)
+
+See tool-menu.md for signatures/contracts and PROGRESS.md for gotchas.
 """
 
 from __future__ import annotations
@@ -23,13 +31,69 @@ from mcp.client.stdio import stdio_client
 
 load_dotenv()  # our .env: ANTHROPIC_API_KEY + SPLUNK_* creds
 
-SPLUNK_MCP_DIR = os.environ.get("SPLUNK_MCP_DIR", "/Users/arezziorietti/splunk-mcp")
 INDEX = os.environ.get("OPS_INDEX", "botsv3")
 
+# official (HTTP) | livehybrid (stdio subprocess)
+MCP_BACKEND = os.environ.get("OPS_MCP_BACKEND", "official").lower()
+
 
 # --------------------------------------------------------------------------- #
-# splunk-mcp stdio plumbing
+# Backend: official Splunk MCP Server (streamable HTTP)
 # --------------------------------------------------------------------------- #
+def _official_url() -> str:
+    """Endpoint of the in-Splunk MCP app: https://<host>:8089/services/mcp."""
+    url = os.environ.get("SPLUNK_MCP_URL")
+    if url:
+        return url
+    raw_host = os.environ.get("SPLUNK_HOST", "localhost:8089")
+    if ":" not in raw_host:
+        raw_host = f"{raw_host}:{os.environ.get('SPLUNK_PORT', '8089')}"
+    scheme = os.environ.get("SPLUNK_SCHEME", "https")
+    return f"{scheme}://{raw_host}/services/mcp"
+
+
+def _official_token() -> str:
+    tok = os.environ.get("SPLUNK_MCP_TOKEN") or os.environ.get("SPLUNK_TOKEN")
+    if not tok:
+        raise RuntimeError(
+            "OPS_MCP_BACKEND=official needs a Splunk bearer token in SPLUNK_MCP_TOKEN "
+            "(for https://<host>:8089/services/mcp). Install the Splunk MCP Server app, "
+            "grant the mcp_tool_execute capability, and create a token — see README."
+        )
+    return tok
+
+
+def _insecure_httpx_factory(headers=None, timeout=None, auth=None):
+    """httpx client factory for streamablehttp_client; honors VERIFY_SSL (default off)
+    so we can reach a local self-signed Splunk over TLS."""
+    import httpx
+
+    verify = os.environ.get("VERIFY_SSL", "false").lower() in ("1", "true", "yes")
+    kwargs: dict[str, Any] = {"headers": headers, "auth": auth,
+                              "follow_redirects": True, "verify": verify}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    return httpx.AsyncClient(**kwargs)
+
+
+async def _acall_http(tool_name: str, arguments: dict) -> Any:
+    from mcp.client.streamable_http import streamablehttp_client
+
+    headers = {"Authorization": f"Bearer {_official_token()}"}
+    async with streamablehttp_client(
+        _official_url(), headers=headers, httpx_client_factory=_insecure_httpx_factory
+    ) as (read, write, _get_session_id):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            return await session.call_tool(tool_name, arguments)
+
+
+# --------------------------------------------------------------------------- #
+# Backend: community livehybrid/splunk-mcp (stdio subprocess) — fallback
+# --------------------------------------------------------------------------- #
+SPLUNK_MCP_DIR = os.environ.get("SPLUNK_MCP_DIR", "/Users/arezziorietti/splunk-mcp")
+
+
 def _splunk_env() -> dict[str, str]:
     """Build the subprocess env in the shape splunk-mcp expects (host/port split)."""
     raw_host = os.environ.get("SPLUNK_HOST", "localhost:8089")
@@ -59,6 +123,22 @@ def _server_params() -> StdioServerParameters:
         args=["--directory", SPLUNK_MCP_DIR, "run", "python", "splunk_mcp.py", "stdio"],
         env=_splunk_env(),
     )
+
+
+async def _acall_stdio(tool_name: str, arguments: dict) -> Any:
+    async with stdio_client(_server_params()) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            return await session.call_tool(tool_name, arguments)
+
+
+# --------------------------------------------------------------------------- #
+# Dispatch + result normalization (shared by both backends)
+# --------------------------------------------------------------------------- #
+async def _acall(tool_name: str, arguments: dict) -> Any:
+    if MCP_BACKEND == "official":
+        return await _acall_http(tool_name, arguments)
+    return await _acall_stdio(tool_name, arguments)
 
 
 def _texts(result: Any) -> list[str]:
@@ -94,26 +174,29 @@ def _rows_from_result(result: Any) -> Any:
     return parsed
 
 
-async def _acall(tool_name: str, arguments: dict) -> Any:
-    async with stdio_client(_server_params()) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            return await session.call_tool(tool_name, arguments)
-
-
 def run_search(spl: str, earliest_time: str, latest_time: str, max_results: int = 500) -> dict:
-    """Execute SPL via splunk-mcp's search_splunk and return the standard tool shape."""
-    result = asyncio.run(
-        _acall(
-            "search_splunk",
-            {
-                "search_query": spl,
-                "earliest_time": earliest_time,
-                "latest_time": latest_time,
-                "max_results": max_results,
-            },
-        )
-    )
+    """Execute SPL via the active MCP backend and return the standard tool shape.
+
+    Picks the right tool name + argument names for the backend: ``run_splunk_query``
+    (query/earliest_time/latest_time) for the official server, ``search_splunk``
+    (search_query/.../max_results) for livehybrid.
+    """
+    if MCP_BACKEND == "official":
+        tool_name = "run_splunk_query"
+        arguments = {
+            "query": spl,
+            "earliest_time": earliest_time,
+            "latest_time": latest_time,
+        }
+    else:
+        tool_name = "search_splunk"
+        arguments = {
+            "search_query": spl,
+            "earliest_time": earliest_time,
+            "latest_time": latest_time,
+            "max_results": max_results,
+        }
+    result = asyncio.run(_acall(tool_name, arguments))
     rows = _rows_from_result(result)
     if rows is None:
         rows = []
