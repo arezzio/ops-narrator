@@ -57,7 +57,19 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [x] **Session 3 — Trace logger** — `trace.py` (standalone; reconstructs JSONL from `run_agent` result) + `test_trace.py` (9/9 fast, offline). Wired into `run_agent` (writes `traces/trace-<utc>-<host>.jsonl` by default, guarded; `trace_path` in result). Live `test_agent.py` PASSES with trace assertions: real run produced **52 events** (8 thinking, 18 tool_call+18 tool_result, 4 assistant_text, **2 hypothesis_revision**). Event types: `run_started · thinking · assistant_text · tool_call · tool_result · hypothesis_revision · run_finished`.
 - [~] **Session 4 — System prompt + brief schema** — **code done, live validation BLOCKED on API credits.** Wrote the real anti-recall `prompts/system.md` (describes the brief shape + P1–P4 severity + evidence discipline; still no dataset/threat/host/IP/outcome names) and expanded `finalize_brief`'s schema to codify the Session-3 brief shape: `severity, headline, summary, findings[{title,evidence,mitre[],iocs[]}], timeline[], iocs{}, scope{}, gaps[], recommended_containment[]` (required: severity/headline/summary/findings/recommended_containment). Added `validate_runs.py` (grader scores each run clean = finalized + schema-complete + ground-truth substance: 3 hosts, C2 IP, WMI lateral, payload decoded — ground truth kept OUT of the prompt). Agent imports clean. **The 5-consecutive-clean-runs bar is NOT yet met:** the smoke run 400'd with "credit balance is too low" (the big Session-3 run drained the Anthropic account). Resume: top up API credits, then `uv run python validate_runs.py 5`.
 - [ ] **Session 5 — Force the pivot** (tune tool *outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).
-- [ ] **Session 6 — FastAPI webhook** (`webhook.py` POST `/alert`, 200 + background task, writes `briefs/` + `traces/`).
+- [x] **Session 6 — FastAPI webhook** — `webhook.py` + `test_webhook.py` (**10/10 offline, mocked
+  `run_agent` — no credits/Splunk needed**). `POST /alert` maps the Splunk webhook `result` row →
+  alert dict (`build_alert`, drops `__mv_*` twins, accepts bare dicts for curl), returns **200
+  immediately** with `{status,run_id,brief_url}`, and runs the agent loop in a **background task**
+  (FastAPI threadpool; `tools.py` is sync `asyncio.run` per call → safe). The compact run record
+  (transcript + per-tool `input` stripped) is written to `briefs/<run_id>.json`; the JSONL trace to
+  `traces/` by `run_agent`. A failed investigation still 200s and records `stop_reason:"error"`.
+  **Also closes the Session-8 FastAPI-static-wiring gap:** serves `viewer.html` at `/viewer.html`,
+  mounts `traces/` + `briefs/` static, and a `/` runs-dashboard (HTML, sev-colored, each row links
+  `viewer.html?trace=traces/...`) + `/runs` JSON + `/healthz`. The viewer's existing relative
+  `?trace=traces/<f>.jsonl` fetch resolves against these mounts **with zero viewer.html changes**.
+  Live-booted the real app stack (mocked agent) — all routes verified. Run:
+  `uv run uvicorn webhook:app --host 0.0.0.0 --port 8000`.
 - [ ] **Session 7 — Splunk saved search** (in Splunk Web; webhook alert action → `http://localhost:8000/alert`).
 - [~] **Session 8 — Trace UI** — `viewer.html` built (single self-contained file, **zero external/CDN
   assets** so it works offline at demo time). Renders an alert card + run config chips (from
@@ -74,6 +86,7 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
   and 0-pivot gemini run) render correctly. **Remaining:** wire it into FastAPI static serving — deferred
   to Session 6 (`webhook.py`), which doesn't exist yet. The pure transform fns (`parseTrace`,
   `buildModel`) are `module.exports`-guarded so they're Node-testable; DOM code is `typeof document`-guarded.
+  **FastAPI-static wiring DONE in Session 6** (`webhook.py` serves `/viewer.html` + mounts `/traces`).
 - [ ] **Session 9 — Rehearsals** (user; 3 consecutive clean runs; live-vs-prerecord decision).
 - [ ] **Session 10 — Polish + handoff** (README, 1-page handout, positioning slide, final recording).
   - *Compliance pass (done early):* `LICENSE` (MIT), `README.md`, `architecture_diagram.md`, and
@@ -85,12 +98,20 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
     "Best Use of Splunk MCP Server" bonus + Stage-One theme fit.
 
 ## Current position
-**Session 8 (`viewer.html`) was built + verified out-of-order (2026-05-24) while Session 4
-stays blocked on Anthropic credits** — the user declined to top up this session, so we did the
-most valuable *fully-offline-verifiable* work instead. The viewer is done bar the FastAPI-static
-wiring (needs Session 6's `webhook.py`). See the Session 8 checklist note above. Next offline
-option if continuing without credits: **Session 6 — `webhook.py`** (buildable + mockable-unit-testable
-offline; only the true end-to-end fire needs credits).
+**Session 6 (`webhook.py`) built + verified offline (2026-05-24), out of order, while Session 4
+stays blocked on Anthropic credits.** Probed at session start: a 1-token `claude-opus-4-7` call
+still returns `credit balance is too low`, so we again did the most valuable *fully-offline-
+verifiable* work. `webhook.py` + `test_webhook.py` are done (10/10, mocked `run_agent`) and the
+real app stack was live-booted with a mocked agent (all routes pass) — this also closed Session
+8's leftover FastAPI-static-wiring gap (viewer + `/traces` are now served). The **only** part of
+Session 6 that still needs credits is the true end-to-end fire (real Splunk alert → real agent
+run); the HTTP/persistence/serving path is proven.
+
+**Sessions 8 + 6 were both built out-of-order while Session 4 is the real critical-path
+blocker.** Remaining offline-buildable work before credits are needed: **Session 7 — Splunk
+saved search** is mostly a Splunk-Web config task (point a webhook alert action at
+`http://localhost:8000/alert`); it can be set up now and dry-fired against a running `webhook.py`
+(Splunk → 200 ack), but a *meaningful* fire still needs the agent, i.e. credits.
 
 **Session 4 code is committed but UNVERIFIED — live validation is still blocked on Anthropic
 API credits.** (2026-05-24: confirmed the gemini/groq dev backends can't substitute — gemini
