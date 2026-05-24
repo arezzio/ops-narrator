@@ -85,6 +85,29 @@ Note the Session-3 live run already produced a rich, well-structured brief and 2
 hypothesis pivots, so the raw behavior is close; Sessions 4–5 are about *codifying the brief
 shape* and *making the pivot reliable*.
 
+Multi-provider model support (added 2026-05-24, out of the session sequence):
+- The model call is abstracted behind `providers/` (`base.py` + `anthropic_client.py`,
+  `google_client.py`, `openai_compat.py`, factory in `__init__.py`). Select via
+  `OPS_MODEL_PROVIDER` (default `anthropic`); the loop, tool dispatch, and trace format are
+  unchanged. `agent.py` dispatches through `providers.get_client()` and records
+  provider+model in the run-start trace config and the result; `main.py` prints a footer.
+- Adapters: `anthropic` (unchanged behavior — adaptive thinking + `effort`, raw SDK blocks
+  passed through to preserve thinking signatures), `google` (Gemini 2.5 Flash via the
+  **new `google-genai` SDK**, not the deprecated `google-generativeai`; native thinking via
+  `ThinkingConfig(include_thoughts=True)`), `groq` + `ollama` (both via the `openai` SDK's
+  OpenAI-compatible endpoint; no native thinking → one info line logged at run start).
+- Canonical in-loop transcript stays Anthropic-shaped; non-anthropic adapters re-translate
+  the whole history each call and normalize responses back to Anthropic-shaped blocks.
+- **Gemini schema gotcha:** Gemini's function-declaration schema is an OpenAPI subset —
+  types must be UPPER-CASE and a property-less OBJECT is rejected, so `_clean_gemini_schema`
+  uppercases types and **prunes the free-form `iocs` object** from `finalize_brief` (Gemini
+  won't emit structured `iocs`; acceptable for a dev backend, `iocs` isn't required).
+- **Verified:** offline `test_providers.py` (14 tests — schema translation + response
+  normalization per provider, all mocked) and a fake-client end-to-end loop smoke. `uv run
+  pytest test_trace.py test_providers.py` = 23 green. **NOT yet verified live:** real
+  `OPS_MODEL_PROVIDER=google`/`groq` runs (no keys set here) and the anthropic regression
+  run (still blocked on API credits, same as Session 4). Deps added: `openai`, `google-genai`.
+
 Trace-logger notes for whoever builds the Session 8 viewer:
 - `trace.py` is standalone (no `agent` import); `agent` imports it. `run_agent(alert, trace=True)`
   writes `traces/trace-<utc>-<host>.jsonl` and sets `result["trace_path"]` (failure is caught →

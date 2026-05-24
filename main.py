@@ -12,6 +12,7 @@ path. Requires ANTHROPIC_API_KEY and a reachable Splunk instance (see README).
 from __future__ import annotations
 
 import json
+import logging
 import sys
 
 import agent
@@ -34,6 +35,10 @@ DEMO_TRIGGER = {
 
 
 def main() -> int:
+    # Library code (agent/providers) logs via the "ops_narrator" logger; surface INFO
+    # lines (e.g. the no-native-thinking note for groq/ollama) on the CLI.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     if len(sys.argv) > 1:
         with open(sys.argv[1], encoding="utf-8") as f:
             alert = json.load(f)
@@ -43,8 +48,11 @@ def main() -> int:
     result = agent.run_agent(alert)
 
     print(json.dumps(result.get("brief"), indent=2, default=str))
+    # Footer to stderr (stdout stays valid JSON) so each brief is self-documenting about
+    # which provider/model produced it.
     print(
-        f"\nstop_reason={result['stop_reason']}  iterations={result['iterations']}  "
+        f"\nprovider={result.get('provider')}  model={result.get('model')}\n"
+        f"stop_reason={result['stop_reason']}  iterations={result['iterations']}  "
         f"elapsed={result['elapsed_sec']}s",
         file=sys.stderr,
     )

@@ -111,6 +111,49 @@ uv run python mint_token.py
 `.env` is gitignored. The official backend's SPL tool is `splunk_run_query`; results come back
 as `{results:[...], total_rows, truncated}` and are unwrapped automatically.
 
+## Model providers
+
+The agent loop's reasoning model is pluggable via `OPS_MODEL_PROVIDER` (default
+`anthropic`). Claude is the default and the model used for the demo + submission; the
+other backends exist so we can iterate during development without burning Anthropic
+credits. The agent loop, tool dispatch, and reasoning-trace format are identical across
+providers — only the model call is swapped (see `providers/`).
+
+| Provider | Best for | What you get | Tradeoff |
+|---|---|---|---|
+| **Anthropic Claude Opus 4.7** (default, used for demo + submission) | Final-quality investigation, extended thinking, reliable structured brief | Best multi-hop reasoning across the kill chain; cleanest JSON brief; native adaptive thinking | Costs API credits |
+| Google Gemini 2.5 Flash | Free-tier development iteration | ~250K TPM, function calling, 1M context, native thinking mode | Reduced RPD on free tier post-Dec 2025; reasoning slightly lighter on tricky pivots |
+| Groq Llama 3.3 70B Versatile | Fast smoke tests at zero cost | 30 RPM, ~300 TPS inference speed | 6K TPM ceiling on free tier throttles mid-investigation as context grows |
+| Ollama (local, default `qwen2.5:14b`) | Offline plumbing tests, no rate limits | Tests dispatch, tracing, loop termination without network | Tool-use reliability drops; not for assessing investigation quality |
+
+Select a provider per run (each needs its key/host set in `.env` — see `.env.example`):
+
+```bash
+OPS_MODEL_PROVIDER=anthropic uv run python main.py   # default; the demo + submission path
+OPS_MODEL_PROVIDER=google    uv run python main.py   # needs GOOGLE_API_KEY
+OPS_MODEL_PROVIDER=groq      uv run python main.py   # needs GROQ_API_KEY (may hit TPM mid-run — expected)
+OPS_MODEL_PROVIDER=ollama    uv run python main.py   # local Ollama at OPS_OLLAMA_HOST
+```
+
+The provider and model are recorded in the run-start trace event and printed as a footer
+after the brief, so every artifact is self-documenting about how it was produced. Only
+Anthropic and Gemini have native server-side thinking the trace can capture; for Groq and
+Ollama the run logs one line at start (`Provider X has no native thinking; relying on
+tool-call reasoning`) and the agent reasons through its tool calls instead.
+
+### Why Claude for the demo
+
+The provider choice is intentional, not budgetary:
+
+- **The submission names Opus 4.7, and the model is integral to the architecture.** Ops
+  Narrator *is* a Claude agent loop; the other backends are development conveniences.
+- **Extended thinking measurably improves the brief.** On multi-host kill-chain
+  reconstruction, Opus 4.7's adaptive thinking produces tighter pivots and fewer missed
+  links than the lighter-reasoning alternatives.
+- **The structured `finalize_brief` schema is most reliably produced by Opus 4.7** in our
+  testing — the deep `findings`/`timeline`/`iocs`/`scope` shape comes back clean run after
+  run, where smaller models more often drop or malform fields.
+
 ## Configuration — choosing the MCP backend
 
 `OPS_MCP_BACKEND` selects how the agent reaches Splunk:
@@ -140,7 +183,8 @@ uv run pytest test_agent.py -v -s     # live: requires Splunk + Anthropic key (f
 uv run python validate_runs.py 5
 ```
 
-Tunable via env vars: `OPS_MODEL`, `OPS_EFFORT` (low|medium|high|xhigh|max), `OPS_MAX_ITERS`,
+Tunable via env vars: `OPS_MODEL_PROVIDER` (anthropic|google|groq|ollama — see Model
+providers), `OPS_MODEL`, `OPS_EFFORT` (low|medium|high|xhigh|max), `OPS_MAX_ITERS`,
 `OPS_WALL_CLOCK_CAP`.
 
 ## Project layout
@@ -148,6 +192,7 @@ Tunable via env vars: `OPS_MODEL`, `OPS_EFFORT` (low|medium|high|xhigh|max), `OP
 | Path | Purpose |
 |---|---|
 | `agent.py` | The agent loop: tool schemas, dispatch, model calls, iteration/time budgets |
+| `providers/` | Pluggable model backends (anthropic/google/groq/ollama) behind one interface |
 | `tools.py` | The eight tool implementations (Splunk MCP client + payload decoder) |
 | `trace.py` | Reconstructs a JSONL reasoning trace from a run |
 | `main.py` | CLI entrypoint |

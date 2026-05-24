@@ -1,13 +1,17 @@
 """Ops Narrator — Section 2 agent loop.
 
-A manual Anthropic agentic loop (claude-opus-4-7) that investigates a single triggering
-alert by calling the eight tools in tools.py, then ends by calling `finalize_brief`.
+A manual agentic loop that investigates a single triggering alert by calling the eight
+tools in tools.py, then ends by calling `finalize_brief`. The model call itself is
+abstracted behind `providers/` (OPS_MODEL_PROVIDER, default anthropic / claude-opus-4-7);
+the loop, the tool dispatch, and the trace format are provider-agnostic. See
+providers/base.py for how each backend translates to/from the Anthropic-shaped transcript
+the loop and trace logger work in.
 
 Why a *manual* loop rather than the SDK tool runner: we need fine-grained control the
 runner doesn't give us — a hard tool-iteration cap, a wall-clock cap, and per-call
 latency/row_count capture that Session 3's trace logger will hang off of.
 
-Model config notes (see PROGRESS.md gotcha #9):
+Model config notes (see PROGRESS.md gotcha #9), preserved by the anthropic adapter:
 - Opus 4.7 removed `thinking={"type":"enabled","budget_tokens":N}` — it 400s. The spec's
   "thinking budget 8000" maps to adaptive thinking + the `effort` parameter instead.
 - `display:"summarized"` so thinking text is populated (Opus 4.7 omits it by default),
@@ -18,24 +22,29 @@ Model config notes (see PROGRESS.md gotcha #9):
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any
 
-import anthropic
 from dotenv import load_dotenv
 
+import providers
 import tools
 import trace as trace_log
 
 load_dotenv()
+
+log = logging.getLogger("ops_narrator")
 
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
 import os
 
-MODEL = os.environ.get("OPS_MODEL", "claude-opus-4-7")
+# Model selection lives in the adapter now (OPS_MODEL_PROVIDER + each provider's model
+# env var, e.g. OPS_MODEL for anthropic — see providers/). EFFORT is Anthropic-specific
+# (adaptive-thinking effort); other adapters ignore it.
 EFFORT = os.environ.get("OPS_EFFORT", "high")  # low | medium | high | xhigh | max
 MAX_TOKENS = int(os.environ.get("OPS_MAX_TOKENS", "16000"))
 MAX_ITERS = int(os.environ.get("OPS_MAX_ITERS", "12"))  # model invocations
@@ -44,8 +53,6 @@ WALL_CLOCK_CAP = float(os.environ.get("OPS_WALL_CLOCK_CAP", "90"))  # seconds
 _PROMPTS = Path(__file__).parent / "prompts"
 SYSTEM_PROMPT = (_PROMPTS / "system.md").read_text()
 USER_TEMPLATE = (_PROMPTS / "user_template.md").read_text()
-
-_client = anthropic.Anthropic()  # ANTHROPIC_API_KEY from env
 
 
 # --------------------------------------------------------------------------- #
@@ -394,6 +401,11 @@ def run_agent(alert_payload: dict, *, trace: bool = True) -> dict:
     its path is returned under result["trace_path"]. Trace writing is guarded — a
     logging failure never breaks the run, since the brief is the product.
     """
+    client = providers.get_client()
+    note = providers.THINKING_NOTES.get(client.provider)
+    if note:
+        log.info(note)
+
     system = [
         {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
     ]
@@ -417,47 +429,43 @@ def run_agent(alert_payload: dict, *, trace: bool = True) -> dict:
             break
         iters += 1
 
-        resp = _client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=system,
-            thinking={"type": "adaptive", "display": "summarized"},
-            output_config={"effort": EFFORT},
-            tools=TOOL_DEFS,
+        response = client.call_model(
             messages=messages,
+            tools=TOOL_DEFS,
+            system=system,
+            max_tokens=MAX_TOKENS,
+            effort=EFFORT,
         )
 
-        u = resp.usage
-        usage["input"] += u.input_tokens
-        usage["output"] += u.output_tokens
-        usage["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
-        usage["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+        usage["input"] += response.usage["input"]
+        usage["output"] += response.usage["output"]
+        usage["cache_read"] += response.usage["cache_read"]
+        usage["cache_write"] += response.usage["cache_write"]
 
         # Preserve the full assistant turn (thinking blocks included — required when
-        # thinking is on and tool use follows).
-        messages.append({"role": "assistant", "content": resp.content})
+        # thinking is on and tool use follows). `content` is provider-native blocks for
+        # anthropic, normalized dicts otherwise; the adapter handles both on the next call.
+        messages.append({"role": "assistant", "content": response.content})
 
-        if resp.stop_reason != "tool_use":
-            stop = resp.stop_reason  # end_turn, max_tokens, refusal, ...
+        if response.stop_reason != "tool_use":
+            stop = response.stop_reason  # end_turn, max_tokens, refusal, ...
             break
 
         tool_results = []
         finalized = False
-        for block in resp.content:
-            if block.type != "tool_use":
-                continue
-            content_text, meta = _execute_tool(block.name, dict(block.input))
+        for tc in response.tool_calls:
+            content_text, meta = _execute_tool(tc.name, dict(tc.input))
             tool_calls.append(meta)
             tool_results.append(
                 {
                     "type": "tool_result",
-                    "tool_use_id": block.id,
+                    "tool_use_id": tc.id,
                     "content": content_text,
                     "is_error": meta["is_error"],
                 }
             )
-            if block.name == "finalize_brief" and not meta["is_error"]:
-                brief = dict(block.input)["brief"]
+            if tc.name == "finalize_brief" and not meta["is_error"]:
+                brief = dict(tc.input)["brief"]
                 finalized = True
 
         messages.append({"role": "user", "content": tool_results})
@@ -474,11 +482,14 @@ def run_agent(alert_payload: dict, *, trace: bool = True) -> dict:
         "tool_calls": tool_calls,
         "usage": usage,
         "messages": messages,
+        "provider": client.provider,
+        "model": client.model,
     }
 
     if trace:
         config = {
-            "model": MODEL,
+            "provider": client.provider,
+            "model": client.model,
             "effort": EFFORT,
             "max_iters": MAX_ITERS,
             "wall_clock_cap_sec": WALL_CLOCK_CAP,
