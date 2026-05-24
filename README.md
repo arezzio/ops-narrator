@@ -70,7 +70,7 @@ Splunk saved search ──webhook──▶ FastAPI /alert ──▶ agent loop (
 - **Official Splunk MCP Server** (Splunkbase app 7931, streamable HTTP) — the agent's bridge to
   Splunk over the Model Context Protocol
 - **Splunk Enterprise** with the **BOTSv3** dataset — the log data under investigation
-- **FastAPI + Uvicorn** — the webhook that receives the Splunk alert *(in progress, see Status)*
+- **FastAPI + Uvicorn** — the webhook that receives the Splunk alert and serves the trace viewer
 - **Python ≥ 3.10**, managed with [`uv`](https://docs.astral.sh/uv/)
 
 ## Prerequisites
@@ -212,12 +212,15 @@ Build progresses in numbered sessions tracked in `PROGRESS.md`:
 - ✅ Agent loop (Claude Opus 4.7, adaptive thinking, budgeted)
 - ✅ Reasoning‑trace logger (JSONL)
 - ✅ Incident‑brief schema + system prompt
-- ⬜ FastAPI webhook endpoint (`/alert`)
-- ⬜ Splunk saved‑search alert action wiring
-- ⬜ Single‑page trace viewer
+- ✅ FastAPI webhook endpoint (`/alert`) — 12/12 offline tests; serves the viewer + a runs dashboard
+- ✅ Splunk saved‑search alert action wiring (`splunk/savedsearches.conf`) — dry‑fired end to end
+- ✅ Single‑page trace viewer (`viewer.html`) — offline, served by the webhook
 
-The CLI (`main.py`) exercises the full investigate‑and‑brief path today; the webhook and viewer
-package that path for the live demo.
+The full chain — Splunk saved search → webhook → agent loop → brief + JSONL trace → viewer — is
+built and verified offline (the webhook was dry‑fired against live Splunk: a real alert POST got a
+200 ack). The CLI (`main.py`) exercises the same investigate‑and‑brief path. The one step still to
+run against a live model is the agent investigation itself (validation runs and the true
+end‑to‑end fire), which is gated on Anthropic API credits — see `PROGRESS.md`.
 
 ## Attribution
 
