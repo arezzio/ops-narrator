@@ -59,7 +59,21 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [ ] **Session 5 — Force the pivot** (tune tool *outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).
 - [ ] **Session 6 — FastAPI webhook** (`webhook.py` POST `/alert`, 200 + background task, writes `briefs/` + `traces/`).
 - [ ] **Session 7 — Splunk saved search** (in Splunk Web; webhook alert action → `http://localhost:8000/alert`).
-- [ ] **Session 8 — Trace UI** (`viewer.html`, single-file, served via FastAPI static).
+- [~] **Session 8 — Trace UI** — `viewer.html` built (single self-contained file, **zero external/CDN
+  assets** so it works offline at demo time). Renders an alert card + run config chips (from
+  `run_started`), an outcome banner (severity/`stop_reason` badge, brief headline, stat grid:
+  iterations/tool-calls/reasoning/pivots/elapsed/tokens, from `run_finished`), and an
+  iteration-grouped, **filterable** timeline (Reasoning · Tool calls · Narration · Pivots toggles).
+  Each `tool_call` is folded together with its matching `tool_result` (paired by `tool_use_id`) into
+  one collapsible card with latency/row-count badges; `hypothesis_revision` renders as a highlighted
+  pivot callout (cue + from/→to excerpts). Loads a trace 3 ways: file picker, drag-drop, and
+  `?trace=<path>` fetch (the last is how FastAPI will serve it, and how it was verified). **VERIFIED
+  offline (no Anthropic credits needed):** (a) data layer — Node assertions over `buildModel()` against
+  both real traces (52- and 36-event), all event counts match and every tool call paired with its
+  result; (b) visual layer — headless-Chrome screenshots of *both* trace shapes (8-pivot anthropic run
+  and 0-pivot gemini run) render correctly. **Remaining:** wire it into FastAPI static serving — deferred
+  to Session 6 (`webhook.py`), which doesn't exist yet. The pure transform fns (`parseTrace`,
+  `buildModel`) are `module.exports`-guarded so they're Node-testable; DOM code is `typeof document`-guarded.
 - [ ] **Session 9 — Rehearsals** (user; 3 consecutive clean runs; live-vs-prerecord decision).
 - [ ] **Session 10 — Polish + handoff** (README, 1-page handout, positioning slide, final recording).
   - *Compliance pass (done early):* `LICENSE` (MIT), `README.md`, `architecture_diagram.md`, and
@@ -71,10 +85,18 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
     "Best Use of Splunk MCP Server" bonus + Stage-One theme fit.
 
 ## Current position
+**Session 8 (`viewer.html`) was built + verified out-of-order (2026-05-24) while Session 4
+stays blocked on Anthropic credits** — the user declined to top up this session, so we did the
+most valuable *fully-offline-verifiable* work instead. The viewer is done bar the FastAPI-static
+wiring (needs Session 6's `webhook.py`). See the Session 8 checklist note above. Next offline
+option if continuing without credits: **Session 6 — `webhook.py`** (buildable + mockable-unit-testable
+offline; only the true end-to-end fire needs credits).
+
 **Session 4 code is committed but UNVERIFIED — live validation is still blocked on Anthropic
 API credits.** (2026-05-24: confirmed the gemini/groq dev backends can't substitute — gemini
 fabricates the incident, groq free tier can't fit one request. See the multi-provider
-LIVE-VERIFIED note above.) **Session 4 needs Anthropic credits topped up**, then
+LIVE-VERIFIED note above. Re-confirmed 2026-05-24: a 1-token probe still returns
+`credit balance is too low`.) **Session 4 needs Anthropic credits topped up**, then
 `uv run python validate_runs.py 5`. The earlier Session-3
 live run this session passed cleanly, so the loop/MCP path is sound; only the new schema +
 system prompt are unverified against a real run. **To finish Session 4:** add API credits,

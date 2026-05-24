@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ops Narrator — Reasoning Trace</title>
+<style>
+  /* ---- Ops Narrator trace viewer. Single file, zero external assets so it
+         works offline at demo time (served via FastAPI static, or opened directly). ---- */
+  :root{
+    --bg:#0b0f17; --panel:#121826; --panel-2:#0e1420; --line:#1f2937;
+    --ink:#e6edf3; --muted:#8b98a9; --faint:#5b6675;
+    --accent:#37c0c9;          /* splunk-ish teal */
+    --think:#9b8cff;           /* reasoning */
+    --tool:#4aa8ff;            /* tool calls */
+    --ok:#34d399; --warn:#f5b14c; --err:#ff6b6b; --pivot:#ff8fab;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+  a{color:var(--accent)}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 20px 80px}
+
+  /* ---- top bar ---- */
+  header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,#0b0f17,#0b0f17ee);
+    border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
+  .top .wrap{display:flex;align-items:center;gap:16px;padding-top:14px;padding-bottom:14px}
+  .brand{display:flex;align-items:baseline;gap:10px;font-weight:600;letter-spacing:.2px}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);align-self:center}
+  .brand small{color:var(--muted);font-weight:400}
+  .loadbar{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .file{color:var(--muted);font-family:var(--mono);font-size:12px}
+  .btn{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;
+    padding:7px 12px;cursor:pointer;font-size:13px}
+  .btn:hover{border-color:var(--accent);color:#fff}
+
+  /* ---- drop / empty state ---- */
+  #drop{margin:48px 0;border:1.5px dashed var(--line);border-radius:14px;padding:56px 24px;text-align:center;color:var(--muted)}
+  #drop.hot{border-color:var(--accent);background:#0e1722}
+  #drop h2{color:var(--ink);margin:0 0 6px;font-weight:600}
+  #drop code{font-family:var(--mono);color:var(--accent)}
+
+  /* ---- cards ---- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:18px 0}
+  .card h3{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted)}
+  .kgrid{display:grid;grid-template-columns:120px 1fr;gap:6px 16px;font-size:13.5px}
+  .kgrid .k{color:var(--faint)}
+  .kgrid .v{color:var(--ink);word-break:break-word}
+  .cmd{font-family:var(--mono);font-size:12.5px;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:8px;padding:10px 12px;color:#cdd9e5;white-space:pre-wrap;word-break:break-word}
+
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--muted);background:var(--panel-2);
+    border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+  .chip b{color:var(--ink);font-weight:600}
+
+  /* ---- summary banner ---- */
+  .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px;margin:14px 0 6px}
+  .stat{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:center}
+  .stat .n{font-size:22px;font-weight:700;color:#fff}
+  .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--faint);margin-top:2px}
+  .headline{font-size:16px;line-height:1.45;color:#eaf2f8;margin:4px 0 0}
+
+  /* ---- badges ---- */
+  .badge{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.4px;border-radius:6px;
+    padding:2px 7px;text-transform:uppercase}
+  .b-ok{background:rgba(52,211,153,.14);color:var(--ok)}
+  .b-err{background:rgba(255,107,107,.16);color:var(--err)}
+  .b-finalized{background:rgba(55,192,201,.16);color:var(--accent)}
+  .b-cap{background:rgba(245,177,76,.16);color:var(--warn)}
+  .b-neutral{background:rgba(139,152,169,.16);color:var(--muted)}
+
+  /* ---- filter bar ---- */
+  .filters{position:sticky;top:62px;z-index:10;display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+    padding:12px 0;background:linear-gradient(180deg,#0b0f17,#0b0f17ee);border-bottom:1px solid var(--line)}
+  .filters .spacer{flex:1}
+  .tog{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--panel);
+    border-radius:999px;padding:5px 12px;cursor:pointer;font-size:12.5px;user-select:none}
+  .tog .sw{width:9px;height:9px;border-radius:50%;background:var(--faint)}
+  .tog.on{border-color:currentColor}
+  .tog.on .sw{box-shadow:0 0 8px currentColor}
+  .tog[data-k=thinking].on{color:var(--think)} .tog[data-k=thinking].on .sw{background:var(--think)}
+  .tog[data-k=tool].on{color:var(--tool)} .tog[data-k=tool].on .sw{background:var(--tool)}
+  .tog[data-k=assistant_text].on{color:var(--accent)} .tog[data-k=assistant_text].on .sw{background:var(--accent)}
+  .tog[data-k=pivot].on{color:var(--pivot)} .tog[data-k=pivot].on .sw{background:var(--pivot)}
+  .tog .c{color:var(--faint);font-family:var(--mono);font-size:11px}
+
+  /* ---- timeline ---- */
+  .iter{margin:26px 0 10px;display:flex;align-items:center;gap:12px;color:var(--faint);
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.6px;text-transform:uppercase}
+  .iter::before,.iter::after{content:"";height:1px;background:var(--line);flex:1}
+
+  .ev{position:relative;margin:12px 0 12px 22px;padding:14px 16px;border-radius:12px;
+    border:1px solid var(--line);background:var(--panel)}
+  .ev::before{content:"";position:absolute;left:-22px;top:20px;width:9px;height:9px;border-radius:50%;
+    background:var(--faint);border:2px solid var(--bg)}
+  .ev .h{display:flex;align-items:center;gap:10px;font-size:12.5px}
+  .ev .h .name{font-family:var(--mono);font-weight:600}
+  .ev .h .meta{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--faint);font-family:var(--mono);font-size:11px}
+
+  .ev.think{border-left:3px solid var(--think)} .ev.think::before{background:var(--think)}
+  .ev.think .name{color:var(--think)}
+  .ev.tool{border-left:3px solid var(--tool)} .ev.tool::before{background:var(--tool)}
+  .ev.tool .name{color:var(--tool)}
+  .ev.say{border-left:3px solid var(--accent)} .ev.say::before{background:var(--accent)}
+  .ev.pivot{border-left:3px solid var(--pivot);background:linear-gradient(180deg,#1a121a,#121826)}
+  .ev.pivot::before{background:var(--pivot);box-shadow:0 0 10px var(--pivot)}
+  .ev.pivot .name{color:var(--pivot)}
+
+  .body{margin-top:10px}
+  .prose{white-space:pre-wrap;color:#d6dee7;font-size:13.5px}
+  pre.code{font-family:var(--mono);font-size:12px;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:8px;padding:11px 12px;margin:8px 0 0;overflow:auto;color:#cdd9e5;white-space:pre-wrap;word-break:break-word;max-height:340px}
+  .res{margin-top:10px;border-top:1px dashed var(--line);padding-top:10px}
+  .res .rh{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--faint);font-family:var(--mono)}
+  .toggle{cursor:pointer;color:var(--muted);font-size:12px;user-select:none}
+  .toggle:hover{color:var(--ink)}
+  .collapsed .clip{display:none}
+  .fade{position:relative;max-height:120px;overflow:hidden}
+  .fade::after{content:"";position:absolute;inset:auto 0 0 0;height:40px;background:linear-gradient(180deg,transparent,var(--panel))}
+
+  .pivot .cue{font-family:var(--mono);font-size:11px;color:var(--pivot);background:rgba(255,143,171,.12);
+    border:1px solid rgba(255,143,171,.3);border-radius:6px;padding:2px 8px}
+  .pivot .from{color:var(--faint);font-size:12.5px;margin-top:8px;border-left:2px solid var(--line);padding-left:10px}
+  .pivot .to{color:#f3dde5;font-size:13.5px;margin-top:8px}
+
+  footer{color:var(--faint);text-align:center;margin-top:40px;font-size:12px}
+  .err-load{color:var(--err);font-family:var(--mono);font-size:13px}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><span class="dot"></span> Ops Narrator <small>· reasoning trace</small></div>
+    <div class="loadbar">
+      <span class="file" id="fileName"></span>
+      <button class="btn" id="pickBtn">Open trace…</button>
+      <button class="btn" id="expandAll" style="display:none">Expand all</button>
+      <input type="file" id="fileInput" accept=".jsonl,.json,.txt" hidden>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="drop">
+    <h2>Drop a trace file to begin</h2>
+    <div>a <code>traces/trace-*.jsonl</code> file from a run — or click <b>Open trace…</b></div>
+    <div id="loadErr" class="err-load" style="margin-top:14px"></div>
+  </div>
+  <main id="report" style="display:none"></main>
+</div>
+
+<footer>Ops Narrator — Splunk Agentic Ops Hackathon</footer>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Pure data layer (no DOM) — kept side-effect free so it can be
+   unit-tested under Node. See module.exports at the bottom.
+   ============================================================ */
+
+function parseTrace(text){
+  const events = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    const s = line.trim();
+    if (!s) return;
+    let ev;
+    try { ev = JSON.parse(s); }
+    catch (e) { throw new Error("Line " + (i+1) + " is not valid JSON: " + e.message); }
+    events.push(ev);
+  });
+  if (!events.length) throw new Error("No events found in file.");
+  events.sort((a,b) => (a.seq ?? 0) - (b.seq ?? 0));
+  return events;
+}
+
+// Build a render model: header (run_started), footer (run_finished),
+// and an ordered list of timeline items where each tool_call has its
+// matching tool_result folded in (paired by tool_use_id).
+function buildModel(events){
+  const started = events.find(e => e.type === "run_started") || {};
+  const finished = events.find(e => e.type === "run_finished") || {};
+
+  const resultById = {};
+  events.forEach(e => { if (e.type === "tool_result" && e.tool_use_id) resultById[e.tool_use_id] = e; });
+
+  const items = [];
+  const counts = { thinking:0, tool:0, assistant_text:0, pivot:0 };
+
+  events.forEach(e => {
+    switch (e.type){
+      case "thinking":
+        items.push({ kind:"thinking", iteration:e.iteration, redacted:!!e.redacted, text:e.text||"" });
+        counts.thinking++; break;
+      case "assistant_text":
+        if ((e.text||"").trim()){ items.push({ kind:"say", iteration:e.iteration, text:e.text }); counts.assistant_text++; }
+        break;
+      case "hypothesis_revision":
+        items.push({ kind:"pivot", iteration:e.iteration, cue:e.cue, excerpt:e.excerpt, prev:e.prev_excerpt });
+        counts.pivot++; break;
+      case "tool_call":
+        items.push({ kind:"tool", iteration:e.iteration, name:e.name, input:e.input||{},
+          latency_ms:e.latency_ms, row_count:e.row_count, is_error:e.is_error, error:e.error,
+          result: resultById[e.tool_use_id] || null });
+        counts.tool++; break;
+      // tool_result handled via pairing; run_started/finished handled separately
+    }
+  });
+
+  return { started, finished, items, counts, total: events.length };
+}
+
+/* ============================================================
+   DOM rendering (browser only)
+   ============================================================ */
+if (typeof document !== "undefined") (function(){
+
+  const $ = (sel, el=document) => el.querySelector(sel);
+  const el = (tag, cls, txt) => { const n=document.createElement(tag); if(cls)n.className=cls; if(txt!=null)n.textContent=txt; return n; };
+  const esc = s => (s==null ? "" : String(s));
+
+  const filters = { thinking:true, tool:true, assistant_text:true, pivot:true };
+
+  function fmtSec(s){ return (s==null) ? "—" : (s >= 60 ? Math.floor(s/60)+"m "+Math.round(s%60)+"s" : (+s).toFixed(1)+"s"); }
+  function fmtNum(n){ return (n==null) ? "—" : Number(n).toLocaleString(); }
+  function totalTokens(u){ if(!u) return null; return (u.input||0)+(u.output||0); }
+
+  function badgeFor(stop){
+    if (stop === "finalized") return ["b-finalized", "finalized"];
+    if (stop && /cap|timeout|max/i.test(stop)) return ["b-cap", stop];
+    return ["b-neutral", stop || "—"];
+  }
+
+  function renderHeader(m){
+    const root = $("#report");
+    const a = m.started.alert || {};
+    const cfg = m.started.config || {};
+
+    // ---- alert card ----
+    const alertCard = el("section","card");
+    alertCard.appendChild(el("h3", null, "Alert"));
+    const g = el("div","kgrid");
+    const rows = [
+      ["Time", a.time], ["Host", a.host], ["Account", a.account], ["Event", a.event_code],
+    ];
+    rows.forEach(([k,v]) => { if(v!=null){ g.appendChild(el("div","k",k)); g.appendChild(el("div","v",esc(v))); }});
+    alertCard.appendChild(g);
+    if (a.command_line){
+      const c = el("div","cmd", a.command_line); c.style.marginTop="12px"; alertCard.appendChild(c);
+    }
+    const chips = el("div","chips");
+    [["provider",cfg.provider],["model",cfg.model],["effort",cfg.effort],
+     ["max_iters",cfg.max_iters],["wall cap",cfg.wall_clock_cap_sec!=null?cfg.wall_clock_cap_sec+"s":null]]
+      .forEach(([k,v]) => { if(v!=null){ const ch=el("span","chip"); ch.innerHTML=k+" <b>"+esc(v)+"</b>"; chips.appendChild(ch); }});
+    if (chips.children.length) alertCard.appendChild(chips);
+    root.appendChild(alertCard);
+
+    // ---- summary card ----
+    const f = m.finished;
+    const sum = el("section","card");
+    const [bcls, btxt] = badgeFor(f.stop_reason);
+    const h3 = el("h3", null, "Outcome  ");
+    const b = el("span","badge "+bcls, btxt); h3.appendChild(b);
+    sum.appendChild(h3);
+    if (f.brief_headline) sum.appendChild(el("p","headline", f.brief_headline));
+    const stats = el("div","summary");
+    const tok = totalTokens(f.usage);
+    [["Iterations", fmtNum(f.iterations)],
+     ["Tool calls", fmtNum(f.n_tool_calls ?? m.counts.tool)],
+     ["Reasoning", fmtNum(f.n_thinking ?? m.counts.thinking)],
+     ["Pivots", fmtNum(f.n_revisions ?? m.counts.pivot)],
+     ["Elapsed", fmtSec(f.elapsed_sec)],
+     ["Tokens", tok==null?"—":fmtNum(tok)]]
+      .forEach(([l,n]) => { const s=el("div","stat"); s.appendChild(el("div","n",n)); s.appendChild(el("div","l",l)); stats.appendChild(s); });
+    sum.appendChild(stats);
+    root.appendChild(sum);
+  }
+
+  function renderFilters(m){
+    const bar = el("div","filters");
+    bar.appendChild(el("span","file","Timeline"));
+    const labels = { thinking:"Reasoning", tool:"Tool calls", assistant_text:"Narration", pivot:"Pivots" };
+    Object.keys(filters).forEach(k => {
+      const t = el("div","tog on"); t.dataset.k = k;
+      t.appendChild(el("span","sw"));
+      t.appendChild(el("span",null,labels[k]));
+      t.appendChild(el("span","c", "("+(m.counts[k]||0)+")"));
+      t.addEventListener("click", () => { filters[k]=!filters[k]; t.classList.toggle("on", filters[k]); applyFilters(); });
+      bar.appendChild(t);
+    });
+    $("#report").appendChild(bar);
+  }
+
+  function toolMeta(it){
+    const bits = [];
+    if (it.row_count != null) bits.push(it.row_count + (it.row_count===1?" row":" rows"));
+    if (it.latency_ms != null) bits.push(it.latency_ms + " ms");
+    return bits;
+  }
+
+  function makeCollapsible(container, contentEl, openLabel, shortEnough){
+    // contentEl gets clipped unless expanded. shortEnough => render open, no toggle.
+    if (shortEnough){ container.appendChild(contentEl); return; }
+    const wrap = el("div","clip"); wrap.appendChild(contentEl);
+    const tog = el("span","toggle", "▸ " + openLabel);
+    container.classList.add("collapsed");
+    container.appendChild(tog);
+    container.appendChild(wrap);
+    tog.addEventListener("click", () => {
+      const open = !container.classList.toggle("collapsed");
+      tog.textContent = (open ? "▾ " : "▸ ") + openLabel;
+    });
+    container._toggle = tog; // for expand-all
+  }
+
+  function renderTimeline(m){
+    const root = $("#report");
+    let lastIter = null;
+    m.items.forEach(it => {
+      if (it.iteration != null && it.iteration !== lastIter){
+        root.appendChild(el("div","iter","Iteration " + it.iteration));
+        lastIter = it.iteration;
+      }
+      root.appendChild(renderItem(it));
+    });
+  }
+
+  function renderItem(it){
+    if (it.kind === "thinking") return renderThinking(it);
+    if (it.kind === "say") return renderSay(it);
+    if (it.kind === "pivot") return renderPivot(it);
+    if (it.kind === "tool") return renderTool(it);
+    return el("div");
+  }
+
+  function renderThinking(it){
+    const n = el("div","ev think"); n.dataset.k="thinking";
+    const h = el("div","h"); h.appendChild(el("span","name","reasoning"));
+    n.appendChild(h);
+    const body = el("div","body");
+    if (it.redacted){ body.appendChild(el("div","prose","[redacted thinking]")); n.appendChild(body); return n; }
+    const p = el("div","prose", it.text);
+    makeCollapsible(body, p, "show reasoning", (it.text||"").length < 320);
+    n.appendChild(body);
+    return n;
+  }
+
+  function renderSay(it){
+    const n = el("div","ev say"); n.dataset.k="assistant_text";
+    const h = el("div","h"); h.appendChild(el("span","name","narration")); n.appendChild(h);
+    const body = el("div","body"); body.appendChild(el("div","prose", it.text)); n.appendChild(body);
+    return n;
+  }
+
+  function renderPivot(it){
+    const n = el("div","ev pivot"); n.dataset.k="pivot";
+    const h = el("div","h"); h.appendChild(el("span","name","hypothesis pivot"));
+    if (it.cue){ const c=el("span","cue", '“'+it.cue+'”'); h.appendChild(c); }
+    n.appendChild(h);
+    const body = el("div","body");
+    if (it.prev) body.appendChild(el("div","from", it.prev));
+    if (it.excerpt) body.appendChild(el("div","to", "→ " + it.excerpt));
+    n.appendChild(body);
+    return n;
+  }
+
+  function renderTool(it){
+    const n = el("div","ev tool"); n.dataset.k="tool";
+    const h = el("div","h");
+    h.appendChild(el("span","name", it.name || "tool"));
+    if (it.is_error) h.appendChild(el("span","badge b-err","error"));
+    const meta = el("div","meta");
+    toolMeta(it).forEach(t => meta.appendChild(el("span",null,t)));
+    h.appendChild(meta);
+    n.appendChild(h);
+
+    const body = el("div","body");
+    // input
+    if (it.input && Object.keys(it.input).length){
+      const pre = el("pre","code", JSON.stringify(it.input, null, 2));
+      body.appendChild(pre);
+    }
+    // result
+    const r = it.result;
+    if (r){
+      const res = el("div","res");
+      const rh = el("div","rh");
+      rh.appendChild(el("span", null, r.is_error ? "result · error" : "result"));
+      if (r.row_count != null) rh.appendChild(el("span", null, "· " + r.row_count + " rows"));
+      if (r.truncated) rh.appendChild(el("span", null, "· truncated"));
+      res.appendChild(rh);
+      const content = esc(r.content);
+      const pre = el("pre","code", content);
+      makeCollapsible(res, pre, "show result", content.length < 280);
+      body.appendChild(res);
+    } else if (it.error){
+      body.appendChild(el("div","prose", "error: " + it.error));
+    }
+    n.appendChild(body);
+    return n;
+  }
+
+  function applyFilters(){
+    document.querySelectorAll(".ev").forEach(n => {
+      const k = n.dataset.k;
+      n.style.display = filters[k] ? "" : "none";
+    });
+    // hide an iteration divider if everything under it is hidden
+    document.querySelectorAll(".iter").forEach(div => {
+      let sib = div.nextElementSibling, anyVisible = false;
+      while (sib && !sib.classList.contains("iter")){
+        if (sib.classList.contains("ev") && sib.style.display !== "none"){ anyVisible = true; break; }
+        sib = sib.nextElementSibling;
+      }
+      div.style.display = anyVisible ? "" : "none";
+    });
+  }
+
+  function render(events){
+    const m = buildModel(events);
+    const root = $("#report");
+    root.innerHTML = "";
+    renderHeader(m);
+    renderFilters(m);
+    renderTimeline(m);
+    $("#drop").style.display = "none";
+    root.style.display = "";
+    $("#expandAll").style.display = "";
+    window.__model = m; // handy for debugging / verification
+  }
+
+  // ---- expand/collapse all ----
+  let allOpen = false;
+  $("#expandAll").addEventListener("click", () => {
+    allOpen = !allOpen;
+    document.querySelectorAll(".collapsed, .clip").forEach(()=>{});
+    document.querySelectorAll(".ev .toggle").forEach(t => {
+      const container = t.parentElement;
+      const isCollapsed = container.classList.contains("collapsed");
+      if (allOpen && isCollapsed) t.click();
+      if (!allOpen && !isCollapsed) t.click();
+    });
+    $("#expandAll").textContent = allOpen ? "Collapse all" : "Expand all";
+  });
+
+  // ---- loading ----
+  function loadText(text, name){
+    try {
+      const events = parseTrace(text);
+      render(events);
+      $("#fileName").textContent = name || "";
+      $("#loadErr").textContent = "";
+    } catch (e){
+      $("#loadErr").textContent = "Could not load trace: " + e.message;
+      $("#drop").style.display = "";
+      $("#report").style.display = "none";
+    }
+  }
+
+  function loadFile(file){
+    const reader = new FileReader();
+    reader.onload = () => loadText(reader.result, file.name);
+    reader.readAsText(file);
+  }
+
+  $("#pickBtn").addEventListener("click", () => $("#fileInput").click());
+  $("#fileInput").addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+  const drop = $("#drop");
+  ["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("hot"); }));
+  ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("hot"); }));
+  document.addEventListener("drop", e => { e.preventDefault(); const f=e.dataTransfer && e.dataTransfer.files[0]; if(f) loadFile(f); });
+  document.addEventListener("dragover", e => e.preventDefault());
+
+  // ---- auto-load via ?trace=<path> (used when served, and for verification) ----
+  const params = new URLSearchParams(location.search);
+  const traceUrl = params.get("trace");
+  if (traceUrl){
+    fetch(traceUrl)
+      .then(r => { if(!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then(t => loadText(t, traceUrl.split("/").pop()))
+      .catch(e => { $("#loadErr").textContent = "Could not fetch " + traceUrl + ": " + e.message; });
+  }
+})();
+
+// Export pure functions for Node-based tests.
+if (typeof module !== "undefined" && module.exports){
+  module.exports = { parseTrace, buildModel };
+}
+</script>
+</body>
+</html>
