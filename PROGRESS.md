@@ -49,6 +49,23 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
     - Connects via `mcp.client.streamable_http.streamablehttp_client` + custom `httpx_client_factory` honoring `VERIFY_SSL` (default off for local self-signed). (SDK warns to use `streamable_http_client` — cosmetic.)
     - `livehybrid` stdio backend retained as fallback (`OPS_MCP_BACKEND=livehybrid`), validated in Sessions 1–3.
     - **Still blocked:** full agent run (`main.py`/`validate_runs.py`) needs Anthropic credits (gotcha: out of credits). Tools/MCP path itself is proven.
+12. **Real Splunk webhook payload shape — CAPTURED via a live dry-fire (Session 7, 2026-05-24).**
+    Dispatched the saved search with `trigger_actions=1` against a running `webhook.py` and
+    inspected exactly what Splunk POSTed. Findings:
+    - **Shape is `{"result": {<first row fields>}, "search_name", "sid", "results_link", ...}`** —
+      `build_alert` unwraps `result`. Confirmed correct.
+    - **Multivalue fields arrive as JSON arrays with `"-"` as Splunk's null marker** —
+      `Account_Name` came as `["BudStoll", "-"]`, not a scalar. `build_alert._collapse_mv` now
+      drops null markers and collapses to a scalar (else the prompt rendered `['BudStoll','-']`).
+      Also drops the parallel `__mv_<field>` twins. (Tested in `test_webhook.py`.)
+    - **`_time` is delivered as an epoch string** (`"1534759188"` = 05:59:48 EDT). The agent
+      computes its own windows so this is tolerated; not converted.
+    - **BIG narrative finding: the real alert carries the FULL `-enc <base64>` blob**, not the
+      spec's hand-truncated `SQBmACg...` stub (`main.py`'s `DEMO_TRIGGER` truncates it). So in the
+      *live webhook path* the agent can decode the stager on turn 1 — the "agent pulls the full
+      blob from the logs" step only happens with the truncated CLI demo trigger. Both paths are
+      valid; **decide in Session 9 which to demo.** The kill-chain reconstruction (ancestry,
+      cross-host spread, WMI lateral, C2) is unaffected — that always needs Splunk pivots.
 
 ## Plan / session checklist
 - [x] **One-time setup** — uv project, deps, `.env` (all secrets), Splunk up, spec + tool-menu committed.
@@ -70,7 +87,20 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
   `?trace=traces/<f>.jsonl` fetch resolves against these mounts **with zero viewer.html changes**.
   Live-booted the real app stack (mocked agent) — all routes verified. Run:
   `uv run uvicorn webhook:app --host 0.0.0.0 --port 8000`.
-- [ ] **Session 7 — Splunk saved search** (in Splunk Web; webhook alert action → `http://localhost:8000/alert`).
+- [x] **Session 7 — Splunk saved search** — created via REST (`servicesNS/admin/search/saved/searches`):
+  name **`Ops Narrator - Encoded PowerShell Beachhead`**, generic encoded-PS detection
+  (`EventCode=4688 … "*powershell*" "*-enc*"`) + `| sort 0 _time | head 1 | table …` so it returns
+  exactly one deterministic row = **patient zero BSTOLL-L at 03:59:48 CST (= 05:59:48 EDT, the spec's
+  DEMO_TRIGGER)**. Alert when results>0, **webhook alert action → `http://localhost:8000/alert`**.
+  Stored window is relative (`-24h`) so a stray background run matches nothing; **created
+  `disabled=1`** to prevent any background firing (and accidental credit burn once topped up).
+  **Dry-fire VERIFIED end-to-end (no credits spent):** enabled → dispatched with `trigger_actions=1`
+  + explicit Aug-2018 window → Splunk POSTed to the live `webhook.py` → 200 ack, run_id
+  `…-BSTOLL-L`, agent 400'd on credits (expected) and the error was recorded. Captured the real
+  payload shape — see **gotcha #12** (multivalue `Account_Name`, epoch `_time`, full `-enc` blob).
+  Re-disabled afterward. **To arm for the demo:** set `disabled=0`, then either let the cron fire or
+  dispatch with `trigger_actions=1` + the Aug-2018 window. (Done over REST, not Splunk Web, but the
+  saved search shows up in Web → Settings → Searches for the user to inspect/tune.)
 - [~] **Session 8 — Trace UI** — `viewer.html` built (single self-contained file, **zero external/CDN
   assets** so it works offline at demo time). Renders an alert card + run config chips (from
   `run_started`), an outcome banner (severity/`stop_reason` badge, brief headline, stat grid:
@@ -98,20 +128,26 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
     "Best Use of Splunk MCP Server" bonus + Stage-One theme fit.
 
 ## Current position
-**Session 6 (`webhook.py`) built + verified offline (2026-05-24), out of order, while Session 4
-stays blocked on Anthropic credits.** Probed at session start: a 1-token `claude-opus-4-7` call
-still returns `credit balance is too low`, so we again did the most valuable *fully-offline-
-verifiable* work. `webhook.py` + `test_webhook.py` are done (10/10, mocked `run_agent`) and the
-real app stack was live-booted with a mocked agent (all routes pass) — this also closed Session
-8's leftover FastAPI-static-wiring gap (viewer + `/traces` are now served). The **only** part of
-Session 6 that still needs credits is the true end-to-end fire (real Splunk alert → real agent
-run); the HTTP/persistence/serving path is proven.
+**ALL offline-buildable work is now done (2026-05-24). Sessions 6, 7, and 8 are complete and
+verified without spending API credits; only credit-gated validation/rehearsal remains.** Probed
+at session start: a 1-token `claude-opus-4-7` call still returns `credit balance is too low`, so we
+built out everything reachable offline:
+- **Session 6 — `webhook.py`** (FastAPI): `/alert` maps the Splunk payload → 200 ack → background
+  `run_agent` → `briefs/<run_id>.json` + trace; serves `viewer.html` + `/traces` + `/briefs` + a `/`
+  runs dashboard. `test_webhook.py` 12/12 (mocked agent); real app stack live-booted, all routes pass.
+  Also closed Session 8's leftover FastAPI-static-wiring gap.
+- **Session 7 — Splunk saved search** created via REST, **dry-fired end-to-end** (Splunk really
+  POSTed to the live webhook; 200 ack; agent 400'd on credits as expected). Real payload shape
+  captured → **gotcha #12** + a `build_alert` multivalue fix. Search left `disabled=1`.
+- **Session 8 — `viewer.html`** (prior session) verified offline; now actually served by `webhook.py`.
 
-**Sessions 8 + 6 were both built out-of-order while Session 4 is the real critical-path
-blocker.** Remaining offline-buildable work before credits are needed: **Session 7 — Splunk
-saved search** is mostly a Splunk-Web config task (point a webhook alert action at
-`http://localhost:8000/alert`); it can be set up now and dry-fired against a running `webhook.py`
-(Splunk → 200 ack), but a *meaningful* fire still needs the agent, i.e. credits.
+**The single remaining blocker is Anthropic credits.** Everything that does NOT need credits is
+built and proven. What's left ALL needs a funded Anthropic account:
+- **Session 4 validation** — `uv run python validate_runs.py 5` (5 consecutive clean runs).
+- **Session 5** — force the pivot (needs live runs to tune/measure).
+- **The true end-to-end fire** — arm the saved search (`disabled=0`) → real Splunk alert → real
+  agent run → brief + trace rendered in the viewer. (Plumbing is proven; only the agent run is gated.)
+- **Sessions 9–10** — rehearsals, recording, handout (user-driven).
 
 **Session 4 code is committed but UNVERIFIED — live validation is still blocked on Anthropic
 API credits.** (2026-05-24: confirmed the gemini/groq dev backends can't substitute — gemini

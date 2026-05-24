@@ -72,6 +72,19 @@ def test_build_alert_unwraps_splunk_result_and_drops_mv():
     assert "__mv_host" not in alert  # multivalue twins stripped
 
 
+def test_build_alert_collapses_multivalue_account():
+    # Exact shape a real Splunk fire delivered: 4688 account field is multivalue,
+    # with "-" as Splunk's null marker.
+    alert = webhook.build_alert({"result": {"host": "BSTOLL-L",
+                                            "Account_Name": ["BudStoll", "-"]}})
+    assert alert["Account_Name"] == "BudStoll"  # scalar, null marker dropped
+
+
+def test_build_alert_joins_real_multivalue():
+    alert = webhook.build_alert({"result": {"x": ["a", "b", "-"]}})
+    assert alert["x"] == "a, b"
+
+
 def test_build_alert_accepts_bare_dict():
     bare = {"host": "FYODOR-L", "EventCode": "4688"}
     assert webhook.build_alert(bare) == bare

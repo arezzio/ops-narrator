@@ -63,17 +63,36 @@ ALERT_FIELDS = (
 _HEAVY_KEYS = ("messages",)
 
 
+def _collapse_mv(value: Any) -> Any:
+    """Collapse a Splunk multivalue field to a clean scalar.
+
+    Splunk serializes multivalue fields as JSON arrays in the webhook body and uses
+    ``"-"`` as a null marker — e.g. 4688's account field arrives as
+    ``["BudStoll", "-"]`` (confirmed against a real fire). The agent's prompt template
+    wants a scalar, so drop the null markers and join what's left.
+    """
+    if not isinstance(value, list):
+        return value
+    kept = [str(v) for v in value if v not in ("-", "", None)]
+    if not kept:
+        return ""
+    return kept[0] if len(kept) == 1 else ", ".join(kept)
+
+
 def build_alert(payload: dict) -> dict:
     """Map a raw webhook POST body to the alert dict ``run_agent`` expects.
 
     Splunk's webhook action wraps the triggering row under ``result``; a bare alert
     dict (curl tests, other SIEMs) is accepted as-is. Splunk also emits parallel
-    ``__mv_<field>`` multivalue keys — we ignore those and keep the plain values.
+    ``__mv_<field>`` multivalue keys — we ignore those and collapse any multivalue
+    arrays in the plain fields to scalars (see ``_collapse_mv``).
     """
     row = payload.get("result", payload)
     if not isinstance(row, dict):
         return {}
-    return {k: v for k, v in row.items() if not k.startswith("__mv_")}
+    return {
+        k: _collapse_mv(v) for k, v in row.items() if not k.startswith("__mv_")
+    }
 
 
 def _slug(value: str, *, fallback: str = "unknown") -> str:
