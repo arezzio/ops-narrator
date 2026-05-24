@@ -17,10 +17,23 @@ Translation notes:
 
 from __future__ import annotations
 
+import logging
 import os
+import re
+import time
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
+
+log = logging.getLogger("ops_narrator")
+
+# Free-tier Gemini caps generate_content at a few requests/minute (5 RPM for
+# gemini-2.5-flash). The agent loop fires calls back-to-back, so we honor the
+# server's RetryInfo and retry rather than crash the run. Bounded so a real
+# outage still fails fast.
+_MAX_429_RETRIES = 6
+_DEFAULT_429_BACKOFF = 20.0  # seconds, if the server gives no retryDelay
 
 from .base import (
     BaseClient,
@@ -30,6 +43,28 @@ from .base import (
     system_to_text,
     to_gemini_tools,
 )
+
+
+def _retry_delay_seconds(err: "genai_errors.ClientError") -> float:
+    """Pull the server-suggested retry delay out of a 429, with a small safety margin.
+
+    Gemini returns a RetryInfo detail (retryDelay: '34s') and also embeds
+    'Please retry in 34.6s.' in the message; we read whichever we can find and
+    fall back to a fixed backoff. +1s margin avoids retrying a hair too early.
+    """
+    delay = None
+    details = getattr(err, "details", None)
+    if isinstance(details, dict):
+        for d in details.get("error", {}).get("details", []) or []:
+            if str(d.get("@type", "")).endswith("RetryInfo"):
+                m = re.match(r"([\d.]+)s", str(d.get("retryDelay", "")))
+                if m:
+                    delay = float(m.group(1))
+    if delay is None:
+        m = re.search(r"retry in ([\d.]+)s", str(getattr(err, "message", "") or err))
+        if m:
+            delay = float(m.group(1))
+    return (delay if delay is not None else _DEFAULT_429_BACKOFF) + 1.0
 
 
 class GoogleClient(BaseClient):
@@ -109,12 +144,28 @@ class GoogleClient(BaseClient):
             thinking_config=types.ThinkingConfig(include_thoughts=True),
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
-        resp = self._client.models.generate_content(
-            model=self.model,
-            contents=self._to_gemini_contents(messages),
-            config=config,
-        )
+        contents = self._to_gemini_contents(messages)
+        resp = self._generate_with_retry(contents, config)
         return self._normalize(resp)
+
+    def _generate_with_retry(self, contents, config):
+        """Call generate_content, retrying on free-tier 429s with the server's backoff."""
+        for attempt in range(_MAX_429_RETRIES + 1):
+            try:
+                return self._client.models.generate_content(
+                    model=self.model, contents=contents, config=config
+                )
+            except genai_errors.ClientError as e:
+                if getattr(e, "code", None) != 429 or attempt == _MAX_429_RETRIES:
+                    raise
+                delay = _retry_delay_seconds(e)
+                log.info(
+                    "Gemini 429 (rate limit); sleeping %.1fs then retrying (attempt %d/%d)",
+                    delay,
+                    attempt + 1,
+                    _MAX_429_RETRIES,
+                )
+                time.sleep(delay)
 
     # -- output normalization ---------------------------------------------- #
     def _normalize(self, resp) -> ModelResponse:

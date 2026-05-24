@@ -71,8 +71,11 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
     "Best Use of Splunk MCP Server" bonus + Stage-One theme fit.
 
 ## Current position
-**Session 4 code is committed but UNVERIFIED — live validation is blocked on Anthropic API
-credits** (smoke run returned HTTP 400 "credit balance is too low"). The earlier Session-3
+**Session 4 code is committed but UNVERIFIED — live validation is still blocked on Anthropic
+API credits.** (2026-05-24: confirmed the gemini/groq dev backends can't substitute — gemini
+fabricates the incident, groq free tier can't fit one request. See the multi-provider
+LIVE-VERIFIED note above.) **Session 4 needs Anthropic credits topped up**, then
+`uv run python validate_runs.py 5`. The earlier Session-3
 live run this session passed cleanly, so the loop/MCP path is sound; only the new schema +
 system prompt are unverified against a real run. **To finish Session 4:** add API credits,
 run `uv run python validate_runs.py 5`, fix anything that isn't clean, then flip the checklist
@@ -104,9 +107,36 @@ Multi-provider model support (added 2026-05-24, out of the session sequence):
   won't emit structured `iocs`; acceptable for a dev backend, `iocs` isn't required).
 - **Verified:** offline `test_providers.py` (14 tests — schema translation + response
   normalization per provider, all mocked) and a fake-client end-to-end loop smoke. `uv run
-  pytest test_trace.py test_providers.py` = 23 green. **NOT yet verified live:** real
-  `OPS_MODEL_PROVIDER=google`/`groq` runs (no keys set here) and the anthropic regression
-  run (still blocked on API credits, same as Session 4). Deps added: `openai`, `google-genai`.
+  pytest test_trace.py test_providers.py` = 23 green.
+- **LIVE-VERIFIED 2026-05-24** (groq + gemini keys added to `.env`). Both backends exercised
+  against real Splunk MCP via `main.py` on the demo trigger:
+  - **google / gemini-2.5-flash — plumbing WORKS end-to-end.** Loop ran 11 iters, dispatched
+    all tools (splunk_search, find_process_ancestry, find_pattern_across_hosts, etc.),
+    `stop_reason=finalized`, schema-complete brief, 91.8s. Schema cleaning + thinking config +
+    Gemini→Anthropic block normalization all held up live.
+    - **Fix applied this session:** free-tier gemini-2.5-flash caps at **5 requests/min**; the
+      loop fires calls back-to-back and 429'd mid-run. `google_client.py` now retries 429s with
+      backoff, honoring the server's `RetryInfo.retryDelay` (`_generate_with_retry` /
+      `_retry_delay_seconds`, ≤6 retries). With rate-limit pacing a run needs a bigger
+      `OPS_WALL_CLOCK_CAP` (used 480 here vs the 90 default).
+    - **QUALITY IS INSUFFICIENT for the ground-truth bar — would fail `validate_runs.py`.** The
+      run produced a *fabricated* incident: invented C2 `stollen.com` + `crypto.exe`, 1 host
+      only, NO lateral movement, NO WMI, wrong C2 (truth is `45.77.53.176`). Root cause in the
+      trace: Gemini never pulled the full encoded blob from the logs — it decoded the truncated
+      `-enc SQBmACg...` stub from the alert (→ 2 chars, `"If�"`), then **fabricated a fake
+      base64 blob and passed it to `decode_payload`**, which faithfully base64-decoded the
+      garbage into mojibake (`If( [System.Net.DnsResolver] -methoddnew "stollen.com"...`). The
+      tools are fine; the 2.5-flash model fabricates evidence. Confirms the architecture call:
+      **anthropic = demo/quality backend; gemini = plumbing/dev iteration only.**
+  - **groq / llama-3.3-70b-versatile — UNUSABLE on free tier.** Adapter formed a correct
+    request, but the first call alone is ~19k tokens (system prompt + tool schemas) and the
+    free `on_demand` tier caps at **12k TPM** → HTTP 413 `rate_limit_exceeded`. No single
+    request can fit regardless of pacing; needs a paid tier or a much smaller prompt.
+  - **Still NOT verified live:** the anthropic regression / Session-4 `validate_runs.py 5`
+    (Anthropic account still out of credits — the whole reason gemini/groq were added).
+    Neither free dev backend clears the 5-clean-runs bar, so real Session-4 validation still
+    needs Anthropic credits (or possibly gemini-2.5-pro — tighter limits, unproven). Deps:
+    `openai`, `google-genai`.
 
 Trace-logger notes for whoever builds the Session 8 viewer:
 - `trace.py` is standalone (no `agent` import); `agent` imports it. `run_agent(alert, trace=True)`
