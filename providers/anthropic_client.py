@@ -14,6 +14,39 @@ import anthropic
 
 from .base import BaseClient, ModelResponse, ToolCall
 
+# How many of the most-recent user turns to anchor with a cache breakpoint. The
+# growing transcript is re-sent every iteration; without these the big tool results
+# (e.g. a 500-row ancestry pull) pay full input price on every turn. With them, each
+# call reads the prior conversation prefix instead. The `system` list carries its own
+# breakpoint (set in agent.py, caches tools+system together), so total breakpoints =
+# 1 (system) + this — kept <= 4, the API max. Two recent anchors also keep reads robust
+# against the 20-block lookback window in tool-heavy turns.
+_MSG_CACHE_BREAKPOINTS = 2
+
+
+def _with_cache_breakpoints(messages: list[dict]) -> list[dict]:
+    """Return a copy of `messages` with `cache_control: ephemeral` on the last content
+    block of the most-recent `_MSG_CACHE_BREAKPOINTS` user turns.
+
+    Only `user` turns are marked — their content is dict blocks we construct (the alert
+    text and tool_result lists), so they're safe to annotate. Assistant turns hold raw
+    Anthropic SDK blocks (thinking signatures intact) and are passed through untouched.
+    Originals are never mutated: only the marked user messages are shallow-copied, so the
+    canonical loop transcript (and the trace) stays clean and breakpoints never accumulate.
+    """
+    user_idxs = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+    mark = set(user_idxs[-_MSG_CACHE_BREAKPOINTS:])
+    out: list[dict] = []
+    for i, m in enumerate(messages):
+        content = m.get("content")
+        if i in mark and isinstance(content, list) and content and isinstance(content[-1], dict):
+            new_content = list(content)
+            new_content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+            out.append({**m, "content": new_content})
+        else:
+            out.append(m)
+    return out
+
 
 class AnthropicClient(BaseClient):
     provider = "anthropic"
@@ -33,7 +66,7 @@ class AnthropicClient(BaseClient):
             thinking={"type": "adaptive", "display": "summarized"},
             output_config={"effort": effort},
             tools=tools,
-            messages=messages,
+            messages=_with_cache_breakpoints(messages),
         )
 
         u = resp.usage

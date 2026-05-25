@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ops Narrator — Positioning</title>
+<style>
+  :root{
+    --bg0:#0b0f14; --bg1:#0f1722; --card:#141d2b; --line:#1e2a3a;
+    --ink:#e6edf3; --mut:#9fb0c3; --teal:#2dd4bf; --teal-dim:#15a394;
+    --amber:#e67e22; --amber-soft:#f0a060;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#000}
+  .slide{
+    width:1280px;height:720px;overflow:hidden;position:relative;
+    background:radial-gradient(1200px 600px at 78% -10%, #16263a 0%, var(--bg1) 42%, var(--bg0) 100%);
+    color:var(--ink);font:16px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    padding:44px 56px;display:flex;flex-direction:column;
+  }
+  .slide::after{content:"";position:absolute;left:0;right:0;bottom:0;height:6px;
+    background:linear-gradient(90deg,var(--teal),var(--amber))}
+  /* header */
+  .top{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .dot{width:13px;height:13px;border-radius:50%;background:var(--teal);box-shadow:0 0 14px var(--teal)}
+  .brand{font-weight:700;letter-spacing:.2px}
+  .kicker{margin-left:6px;color:var(--teal);font-size:12px;text-transform:uppercase;letter-spacing:.18em;
+    border:1px solid var(--teal-dim);padding:3px 9px;border-radius:20px}
+  h1{font-size:46px;line-height:1.05;letter-spacing:-.5px;margin-top:14px}
+  .tag{font-size:21px;color:var(--amber-soft);margin-top:10px;font-weight:500}
+  /* problem -> solution */
+  .ps{display:flex;gap:14px;align-items:stretch;margin-top:20px}
+  .ps .box{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+  .ps .lab{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut);margin-bottom:4px}
+  .ps .arrow{align-self:center;color:var(--teal);font-size:26px;font-weight:700}
+  .ps .box.sol{border-color:var(--teal-dim)}
+  /* pillars */
+  .pillars{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
+  .pill{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 16px;display:flex;gap:13px}
+  .pill .n{color:var(--teal);font-weight:800;font-size:20px;line-height:1.1;min-width:22px}
+  .pill h3{font-size:16px;margin-bottom:2px}
+  .pill p{font-size:13px;color:var(--mut);line-height:1.4}
+  .pill .badge{color:var(--amber-soft);font-weight:600}
+  /* proof strip */
+  .proof{margin-top:auto;background:linear-gradient(90deg,rgba(230,126,34,.16),rgba(20,29,43,.2));
+    border:1px solid #3a2a1a;border-left:4px solid var(--amber);border-radius:12px;
+    padding:13px 18px;display:flex;align-items:center;gap:16px}
+  .sev{background:var(--amber);color:#1a1206;font-weight:800;border-radius:8px;padding:6px 12px;font-size:18px}
+  .proof p{font-size:13.5px;line-height:1.45}
+  .proof b{color:var(--ink)}
+  .proof .hl{color:var(--amber-soft);font-weight:700}
+  /* footer */
+  .foot{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
+  .chip{font-size:11.5px;color:var(--mut);border:1px solid var(--line);border-radius:20px;padding:3px 11px;background:#0e1620}
+  .chip.t{color:var(--teal);border-color:var(--teal-dim)}
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="top">
+      <span class="dot"></span><span class="brand">Ops Narrator</span>
+      <span class="kicker">AI SOC Analyst</span>
+    </div>
+    <h1>One alert in. A verified incident brief out.<br>And it shows its work.</h1>
+    <div class="tag">An autonomous agent that investigates a Splunk alert end to end.</div>
+
+    <div class="ps">
+      <div class="box">
+        <div class="lab">The problem</div>
+        A SOC gets more alerts than humans can investigate. One "encoded PowerShell ran" alert is hours of work — so most are closed in seconds.
+      </div>
+      <div class="arrow">→</div>
+      <div class="box sol">
+        <div class="lab">Ops Narrator</div>
+        A saved search fires a webhook; the agent decodes the payload, reconstructs the kill chain, scopes the blast radius, and writes the SOC-grade brief.
+      </div>
+    </div>
+
+    <div class="pillars">
+      <div class="pill"><div class="n">1</div><div>
+        <h3>Runs on real Splunk</h3>
+        <p>Every step goes through the <b>official Splunk MCP Server</b> over streamable HTTP — not hardcoded answers. <span class="badge">→ Best Use of Splunk MCP Server</span></p>
+      </div></div>
+      <div class="pill"><div class="n">2</div><div>
+        <h3>No hardcoding — provable integrity</h3>
+        <p>Tools and prompt never name the dataset, threat, hosts, or answer. The agent <b>rediscovers the incident from data on every run.</b></p>
+      </div></div>
+      <div class="pill"><div class="n">3</div><div>
+        <h3>Explainable, not a black box</h3>
+        <p>Every run emits a step-by-step reasoning trace — thinking, tool calls with latency + rows, results — rendered in an auditable viewer.</p>
+      </div></div>
+      <div class="pill"><div class="n">4</div><div>
+        <h3>Autonomous but bounded</h3>
+        <p>Claude Opus 4.7 with adaptive thinking and hard iteration + wall-clock budgets. Investigates like an analyst; can't run away.</p>
+      </div></div>
+    </div>
+
+    <div class="proof">
+      <span class="sev">P2</span>
+      <p>From <b>one</b> Windows 4688 event, the agent found an <span class="hl">Empire PowerShell stager</span> via a malicious SharePoint <b>.lnk</b> lure → <b>AMSI + ScriptBlock-logging</b> evasion → HTTPS <span class="hl">C2 to 45.77.53.176</span> → the same campaign on <span class="hl">3 hosts in parallel</span> — with MITRE mappings, timeline, IOCs &amp; containment. <b>~4 minutes.</b></p>
+    </div>
+
+    <div class="foot">
+      <span class="chip t">Splunk Agentic Ops Hackathon · Security</span>
+      <span class="chip">Claude Opus 4.7</span>
+      <span class="chip">Official Splunk MCP Server (app 7931)</span>
+      <span class="chip">FastAPI webhook</span>
+      <span class="chip">botsv3</span>
+    </div>
+  </div>
+</body>
+</html>

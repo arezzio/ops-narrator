@@ -72,7 +72,7 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
 - [x] **Session 1 — Tool wrappers** — `tools.py` + `test_tools.py`, **8/8 passing** live. Confirmed: 3 hosts (BSTOLL-L/ABUNGST-L/FYODOR-L), 1 WMI lateral hit (FYODOR-L), UAC path empty (dead end).
 - [x] **Session 2 — Agent loop** — `agent.py` (manual loop, opus-4-7, **adaptive thinking + effort** — not budget_tokens, see gotcha #9 — ≤12 model iters, 90s cap), `prompts/system.md` (anti-recall placeholder) + `prompts/user_template.md`, `run_agent()`, `test_agent.py`. Live test PASSES: loop pulled the full enc blob from Splunk, decoded the stager, mapped spread to 3 hosts, found the WMI lateral hit, and called `finalize_brief` (`stop_reason=finalized`). Agent investigated for real (found the SharePoint LNK lure + fodhelper UAC bypass on FYODOR-L, the path spec marked unvalidated).
 - [x] **Session 3 — Trace logger** — `trace.py` (standalone; reconstructs JSONL from `run_agent` result) + `test_trace.py` (9/9 fast, offline). Wired into `run_agent` (writes `traces/trace-<utc>-<host>.jsonl` by default, guarded; `trace_path` in result). Live `test_agent.py` PASSES with trace assertions: real run produced **52 events** (8 thinking, 18 tool_call+18 tool_result, 4 assistant_text, **2 hypothesis_revision**). Event types: `run_started · thinking · assistant_text · tool_call · tool_result · hypothesis_revision · run_finished`.
-- [~] **Session 4 — System prompt + brief schema** — **code done, live validation BLOCKED on API credits.** Wrote the real anti-recall `prompts/system.md` (describes the brief shape + P1–P4 severity + evidence discipline; still no dataset/threat/host/IP/outcome names) and expanded `finalize_brief`'s schema to codify the Session-3 brief shape: `severity, headline, summary, findings[{title,evidence,mitre[],iocs[]}], timeline[], iocs{}, scope{}, gaps[], recommended_containment[]` (required: severity/headline/summary/findings/recommended_containment). Added `validate_runs.py` (grader scores each run clean = finalized + schema-complete + ground-truth substance: 3 hosts, C2 IP, WMI lateral, payload decoded — ground truth kept OUT of the prompt). Agent imports clean. **The 5-consecutive-clean-runs bar is NOT yet met:** the smoke run 400'd with "credit balance is too low" (the big Session-3 run drained the Anthropic account). Resume: top up API credits, then `uv run python validate_runs.py 5`.
+- [~] **Session 4 — System prompt + brief schema** — **code done; single-run live verification PASSED 2026-05-24 (after key rotation restored credits); 5-consecutive-clean streak still pending.** A single `OPS_EFFORT=low` live run (trace `traces/trace-20260524-200934-BSTOLL-L.jsonl`) graded **CLEAN** under `validate_runs.evaluate` (finalized in 3 iters/242s, schema-complete P2 brief, all ground truth: 3 hosts, C2 45.77.53.176, WMI lateral, Empire stager + SharePoint .lnk lure; decode_payload + log searches called). **Cost ≈ \$1.2–1.4/run at low effort** (Opus 4.7 = **\$5/\$25 per Mtok in/out**, cache read 0.5 / write 6.25; an earlier note's "\$4.28" used wrong 15/75 rates). So a 5-run `validate_runs.py 5` ≈ **\$6–7**, not ~\$21. High effort (validate_runs default) costs somewhat more. NEXT: `uv run python validate_runs.py 5` for the 5-streak. Wrote the real anti-recall `prompts/system.md` (describes the brief shape + P1–P4 severity + evidence discipline; still no dataset/threat/host/IP/outcome names) and expanded `finalize_brief`'s schema to codify the Session-3 brief shape: `severity, headline, summary, findings[{title,evidence,mitre[],iocs[]}], timeline[], iocs{}, scope{}, gaps[], recommended_containment[]` (required: severity/headline/summary/findings/recommended_containment). Added `validate_runs.py` (grader scores each run clean = finalized + schema-complete + ground-truth substance: 3 hosts, C2 IP, WMI lateral, payload decoded — ground truth kept OUT of the prompt). Agent imports clean. **The 5-consecutive-clean-runs bar is NOT yet met:** the smoke run 400'd with "credit balance is too low" (the big Session-3 run drained the Anthropic account). Resume: top up API credits, then `uv run python validate_runs.py 5`.
 - [ ] **Session 5 — Force the pivot** (tune tool *outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).
 - [x] **Session 6 — FastAPI webhook** — `webhook.py` + `test_webhook.py` (**10/10 offline, mocked
   `run_agent` — no credits/Splunk needed**). `POST /alert` maps the Splunk webhook `result` row →
@@ -117,21 +117,38 @@ Full detail: `ops-narrator-demo-spec-2.md` (in repo root). Tool definitions: `to
   to Session 6 (`webhook.py`), which doesn't exist yet. The pure transform fns (`parseTrace`,
   `buildModel`) are `module.exports`-guarded so they're Node-testable; DOM code is `typeof document`-guarded.
   **FastAPI-static wiring DONE in Session 6** (`webhook.py` serves `/viewer.html` + mounts `/traces`).
-- [ ] **Session 9 — Rehearsals** (user; 3 consecutive clean runs; live-vs-prerecord decision).
+- [~] **Session 9 — Rehearsals / demo setup** (user; live-vs-prerecord decision). **Demo stack
+  stood up + verified 2026-05-24 ($0, no model calls):** `uv run uvicorn webhook:app --host
+  127.0.0.1 --port 8000`, then open **http://127.0.0.1:8000/** (runs dashboard). Synthesized
+  `briefs/20260524T200934Z-BSTOLL-L.json` from the clean trace so the dashboard shows a P2 row →
+  "open trace" → viewer renders the full reasoning timeline (alert card, outcome banner w/ correct
+  C2 45.77.53.176, stat grid, foldable tool calls). Headless-Chrome screenshot confirms the visual.
+  Direct viewer URL: `/viewer.html?trace=traces/trace-20260524-200934-BSTOLL-L.jsonl`. The replay
+  path needs no credits/Splunk. **Open: live-fire (arm saved search disabled=0 + 1 high-effort run
+  ~$1.50) vs pre-recorded replay of this clean trace.**
 - [ ] **Session 10 — Polish + handoff** (README, 1-page handout, positioning slide, final recording).
   - *Compliance pass (done early):* `LICENSE` (MIT), `README.md`, `architecture_diagram.md`, and
     `SUBMISSION_CHECKLIST.md` added to satisfy the Hackathon's mandatory submission artifacts;
     `main.py` is now a real CLI entrypoint. Remaining for Session 10: 1-page handout, positioning
     slide, final recording, and the user-only items in `SUBMISSION_CHECKLIST.md` (public GitHub
-    push, demo video, Devpost submit, Splunk Developer License). **Open strategic question flagged
+    push, demo video, Devpost submit, Splunk Developer License).
+    **DEMO_RUNBOOK.md added 2026-05-24** — full spoken script (timed, ~2 min), click-by-click
+    actions, judge Q&A cheat sheet, backup plan, and a copy/paste 1-page handout. Built for the
+    pre-recorded replay of `traces/trace-20260524-200934-BSTOLL-L.jsonl`. **POSITIONING_SLIDE.md +
+    positioning_slide.html added 2026-05-24** — paste-ready slide text + an on-brand 16:9 HTML slide
+    (dark/teal/amber, matches the viewer; open + screenshot at 2x for the deck). So the 1-page handout,
+    demo script, AND positioning slide are now DRAFTED; still open: the final recording itself, and the
+    user-only checklist items above. **Open strategic question flagged
     there:** whether to target the *official* Splunk MCP Server (vs the community one) for the
     "Best Use of Splunk MCP Server" bonus + Stage-One theme fit.
 
 ## Current position
-**ALL offline-buildable work is now done (2026-05-24). Sessions 6, 7, and 8 are complete and
-verified without spending API credits; only credit-gated validation/rehearsal remains.** Probed
-at session start: a 1-token `claude-opus-4-7` call still returns `credit balance is too low`, so we
-built out everything reachable offline:
+**CREDITS RESTORED 2026-05-24 (user rotated the Anthropic key; 1-token probe returns OK).** The
+first credited run is done: a single cheap probe (`OPS_EFFORT=low`) graded CLEAN — see Session 4.
+Sessions 6, 7, 8 already complete/verified offline. **Remaining credit-gated work: the 5-clean
+streak (`validate_runs.py 5`), Session 5 pivot tuning, the true end-to-end fire, and rehearsals.**
+(History: at the prior session start a 1-token call returned `credit balance is too low`, so we
+built out everything reachable offline:)
 - **Session 6 — `webhook.py`** (FastAPI): `/alert` maps the Splunk payload → 200 ack → background
   `run_agent` → `briefs/<run_id>.json` + trace; serves `viewer.html` + `/traces` + `/briefs` + a `/`
   runs dashboard. `test_webhook.py` 12/12 (mocked agent); real app stack live-booted, all routes pass.
@@ -141,31 +158,61 @@ built out everything reachable offline:
   captured → **gotcha #12** + a `build_alert` multivalue fix. Search left `disabled=1`.
 - **Session 8 — `viewer.html`** (prior session) verified offline; now actually served by `webhook.py`.
 
-**The single remaining blocker is Anthropic credits.** Everything that does NOT need credits is
-built and proven. What's left ALL needs a funded Anthropic account:
+**Credits are no longer the blocker — they're live.** This session (2026-05-24) we did TWO
+live low-effort probe runs and added prompt caching. What's left:
 - **Session 4 validation** — `uv run python validate_runs.py 5` (5 consecutive clean runs).
+  **DECISION (2026-05-24, user): DON'T run the 5× high-effort streak** — it's reliability
+  insurance the demo doesn't need, and it costs credits. Capability is already proven (Run 1
+  clean, full ground truth). Treat Session 4 as functionally done for demo purposes; leave the
+  checklist `[~]` (the formal 5-streak was never met, but we're deliberately skipping it).
+  **What to spend on instead:** ONE **high-effort** run for the actual take the judges see
+  (~\$1.50). Reason: at low effort, 1 of 2 runs truncated the C2 IP (`45.77.53.17`) — a bad
+  look in a SOC brief; high effort de-risks the single demo run. Pre-record so you keep the
+  best take. Build everything else NOW on the existing clean trace
+  (`traces/trace-20260524-200934-BSTOLL-L.jsonl`) for \$0.
 - **Session 5** — force the pivot (needs live runs to tune/measure).
 - **The true end-to-end fire** — arm the saved search (`disabled=0`) → real Splunk alert → real
   agent run → brief + trace rendered in the viewer. (Plumbing is proven; only the agent run is gated.)
 - **Sessions 9–10** — rehearsals, recording, handout (user-driven).
 
-**Session 4 code is committed but UNVERIFIED — live validation is still blocked on Anthropic
-API credits.** (2026-05-24: confirmed the gemini/groq dev backends can't substitute — gemini
-fabricates the incident, groq free tier can't fit one request. See the multi-provider
-LIVE-VERIFIED note above. Re-confirmed 2026-05-24: a 1-token probe still returns
-`credit balance is too low`.) **Session 4 needs Anthropic credits topped up**, then
-`uv run python validate_runs.py 5`. The earlier Session-3
-live run this session passed cleanly, so the loop/MCP path is sound; only the new schema +
-system prompt are unverified against a real run. **To finish Session 4:** add API credits,
-run `uv run python validate_runs.py 5`, fix anything that isn't clean, then flip the checklist
-item to `[x]`. (NB: `validate_runs.py` piped through `tee` masks the Python exit code — check
-the printed table / for a traceback, not just `$?`.)
+**What the two live runs this session established:**
+- **Run 1 (low effort, baseline):** graded CLEAN under `validate_runs.evaluate` — finalized in 3
+  iters, schema-complete P2 brief, all ground truth (3 hosts, C2 45.77.53.176, WMI, Empire stager,
+  SharePoint .lnk). So the Session-4 schema + anti-recall system prompt are now LIVE-VERIFIED on a
+  real run — the loop/MCP/schema path is sound.
+- **Run 2 (low effort, after caching):** did MORE investigation (7 tool calls incl. find_lateral_execution),
+  P1, all 3 hosts — but **truncated the C2 IP to `45.77.53.17`** (dropped the final `6`), so it graded
+  DIRTY on the C2 check. This is **low-effort model variance, NOT a caching bug** (caching is billing-only;
+  identical tokens reach the model). It's the concrete reason to run the 5-streak at **high effort**.
+- So: the architecture is proven end-to-end live; the remaining Session-4 work is purely the
+  5-consecutive-clean bar at demo (high) effort. (NB: `validate_runs.py` piped through `tee` masks the
+  Python exit code — check the printed table / for a traceback, not just `$?`.)
+
+**Uncommitted at end of this session** (nothing committed — user commits when ready): the prompt-caching
+change in `providers/anthropic_client.py` + these `PROGRESS.md` updates. `git status` will show both.
 
 After Session 4 is verified, the plan continues at **Session 5 — Force the pivot** (tune tool
 *outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).
 Note the Session-3 live run already produced a rich, well-structured brief and 2 genuine
 hypothesis pivots, so the raw behavior is close; Sessions 4–5 are about *codifying the brief
 shape* and *making the pivot reliable*.
+
+Prompt caching (added 2026-05-24, after credits restored — out of the session sequence):
+- `providers/anthropic_client.py` now sets `cache_control:ephemeral` rolling breakpoints
+  on the last block of the most-recent 2 user turns (`_with_cache_breakpoints`,
+  `_MSG_CACHE_BREAKPOINTS=2`), applied to a COPY (canonical loop transcript + trace stay
+  clean; other providers never see cache_control). Combined with the existing system-block
+  breakpoint (agent.py:410, caches tools+system) = 3 breakpoints, under the API max of 4.
+  Anthropic-only by design (cache_control is an Anthropic feature).
+- **LIVE-VERIFIED 2026-05-24:** a low-effort run went from `input=225254, cache_read=8544`
+  (system-only caching) to `input=8, cache_read=222074, cache_write=156812` — the growing
+  transcript (incl. a 500-row ancestry tool_result) is now read from cache, not re-sent.
+  Apples-to-apples (same token stream, different billing) ≈ **42% prompt-token cost cut**
+  on a 4-turn run; compounds on longer runs and across a within-5-min batch (the static
+  tools+system prefix is reused run-to-run). `test_providers.py`/`test_trace.py`/
+  `test_webhook.py` = 35 green after the change. NB: caching is billing-only — it does NOT
+  change model output (verified: one run still truncated the C2 IP to `45.77.53.17` at low
+  effort, a quality variance, not a cache artifact).
 
 Multi-provider model support (added 2026-05-24, out of the session sequence):
 - The model call is abstracted behind `providers/` (`base.py` + `anthropic_client.py`,
