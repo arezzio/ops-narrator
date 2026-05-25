@@ -188,8 +188,12 @@ live low-effort probe runs and added prompt caching. What's left:
   5-consecutive-clean bar at demo (high) effort. (NB: `validate_runs.py` piped through `tee` masks the
   Python exit code — check the printed table / for a traceback, not just `$?`.)
 
-**Uncommitted at end of this session** (nothing committed — user commits when ready): the prompt-caching
-change in `providers/anthropic_client.py` + these `PROGRESS.md` updates. `git status` will show both.
+**PUSHED TO PUBLIC GITHUB 2026-05-24: https://github.com/arezzio/ops-narrator** (`origin/master`).
+Commit `f9ef92f` = prompt caching + demo kit; a follow-up commit bundles one verified-clean sample
+(`traces/trace-20260524-200934-BSTOLL-L.jsonl` + `briefs/20260524T200934Z-BSTOLL-L.json`, force-added
+past the gitignore) so a fresh clone is self-demoing (`uvicorn webhook:app` → dashboard → open trace).
+`.env` verified absent from the remote and from history. Demo video reported made by user; remaining
+submission items are user-only (Devpost submit, video upload, Splunk Developer License).
 
 After Session 4 is verified, the plan continues at **Session 5 — Force the pivot** (tune tool
 *outputs/descriptions* — not the system prompt — so 8/10 runs show a clean hypothesis pivot).

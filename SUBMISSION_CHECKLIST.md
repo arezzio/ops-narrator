@@ -49,9 +49,9 @@ confirmation, plus polish (1‑page handout, positioning slide, final recording)
 
 ## Action required by the entrant (cannot be done from the repo)
 
-- [ ] **Push to a PUBLIC GitHub repo** and confirm the MIT license is auto‑detected and shown
-      in the repo's **About** sidebar (the rules require the license be visible at the top of
-      the repo page). The repo has **no remote yet** — create one and `git push`.
+- [x] **Push to a PUBLIC GitHub repo** — done 2026‑05‑24: **https://github.com/arezzio/ops-narrator**
+      (`origin/master` is the submission ref; MIT `LICENSE` at root). Still confirm GitHub's
+      **About** sidebar shows the license at the top of the repo page.
 - [ ] **Demo video < 3 minutes**, public on YouTube/Vimeo/Youku. Must show the project
       functioning, how AI is used, the problem, and the value. Only demo features that
       actually work in the recording (rules: must function "as depicted in the video").

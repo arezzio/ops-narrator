@@ -183,6 +183,14 @@ uv run pytest test_agent.py -v -s     # live: requires Splunk + Anthropic key (f
 uv run python validate_runs.py 5
 ```
 
+**Replay the bundled sample investigation — no credits, no Splunk:** one verified‑clean run
+ships in `traces/` + `briefs/`. Start the webhook server and open the dashboard:
+
+```bash
+uv run uvicorn webhook:app --host 127.0.0.1 --port 8000
+# open http://127.0.0.1:8000/  →  click the P2 row  →  "open trace"
+```
+
 Tunable via env vars: `OPS_MODEL_PROVIDER` (anthropic|google|groq|ollama — see Model
 providers), `OPS_MODEL`, `OPS_EFFORT` (low|medium|high|xhigh|max), `OPS_MAX_ITERS`,
 `OPS_WALL_CLOCK_CAP`.
